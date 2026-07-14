@@ -350,7 +350,7 @@ export default function App() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Special section filter active by default
-  const [filterSeccionesActive, setFilterSeccionesActive] = useState(true);
+  const [filterSeccionesActive, setFilterSeccionesActive] = useState(false);
 
   // Map Base Tile (Satellite by default, as requested by the user)
   const [mapBase, setMapBase] = useState<'satellite' | 'dark'>('satellite');
@@ -1283,8 +1283,8 @@ export default function App() {
           {/* Leaflet Map container */}
           <div className="w-full h-full min-h-[350px] z-0">
             <MapContainer
-              center={[40.4168, -3.7038]}
-              zoom={6}
+              center={[19.7025, -101.1923]}
+              zoom={13}
               scrollWheelZoom={true}
               style={{ width: '100%', height: '100%', background: '#020617' }}
             >
