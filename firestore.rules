@@ -1,0 +1,11 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /kml_data/{document} {
+      // Anyone can view the map layer
+      allow read: if true;
+      // Allow writes for anyone to test, or restrict to admin email if desired
+      allow write: if true;
+    }
+  }
+}
