@@ -12,22 +12,30 @@ export interface SampleKml {
   content: string;
 }
 
-export const SAMPLES: SampleKml[] = [
-  {
-    id: 'mexico_default',
-    name: 'Sección de Prueba (México) 🇲🇽',
-    description: 'Polígono de prueba ubicado en México, configurado como base inicial de la aplicación.',
-    center: { lat: 19.7025, lng: -101.1923 },
-    zoom: 13,
-    content: `<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2">
-  <Document>
-    <name>Secciones de Prueba México</name>
-    <Placemark>
-      <name>Sección de Prueba 1234</name>
-      <description>Área de demostración inicial. El Administrador puede subir el archivo KML definitivo y guardarlo para todos los usuarios.</description>
+const ALLOWED_SECCIONES = [
+  "2729", "2802", "2804", "2805", "1145", "1148", "1149", "1151", "1152", "1153",
+  "1161", "2809", "2810", "2811", "2814", "2815", "2776", "1008", "1052", "1060",
+  "1061", "1141", "1142", "1047", "1022", "1211", "1019", "1210", "2721", "2748"
+];
+
+const generate30SectionsKml = (): string => {
+  let placemarks = '';
+  ALLOWED_SECCIONES.forEach((sec, k) => {
+    // 6 rows x 5 columns grid layout centered at Morelia, Michoacán
+    const row = Math.floor(k / 5);
+    const col = k % 5;
+    const centerLat = 19.7025 + (row - 2.5) * 0.015;
+    const centerLng = -101.1923 + (col - 2) * 0.018;
+    const minLat = centerLat - 0.006;
+    const maxLat = centerLat + 0.006;
+    const minLng = centerLng - 0.007;
+    const maxLng = centerLng + 0.007;
+    
+    placemarks += `    <Placemark id="placemark-${sec}">
+      <name>Sección ${sec}</name>
+      <description>Sección electoral número ${sec}. Cobertura predeterminada en Morelia, Michoacán.</description>
       <ExtendedData>
-        <Data name="Seccion">1234</Data>
+        <Data name="Seccion">${sec}</Data>
         <Data name="Municipio">Morelia</Data>
         <Data name="Estado">Michoacán</Data>
         <Data name="País">México</Data>
@@ -36,13 +44,29 @@ export const SAMPLES: SampleKml[] = [
         <outerBoundaryIs>
           <LinearRing>
             <coordinates>
-              -101.2100,19.7150 -101.1750,19.7150 -101.1750,19.6900 -101.2100,19.6900 -101.2100,19.7150
+              ${minLng},${minLat} ${maxLng},${minLat} ${maxLng},${maxLat} ${minLng},${maxLat} ${minLng},${minLat}
             </coordinates>
           </LinearRing>
         </outerBoundaryIs>
       </Polygon>
-    </Placemark>
-  </Document>
-</kml>`
+    </Placemark>\n`;
+  });
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Secciones Electorales</name>
+${placemarks}  </Document>
+</kml>`;
+};
+
+export const SAMPLES: SampleKml[] = [
+  {
+    id: 'mexico_default',
+    name: 'Secciones Predeterminadas 🇲🇽',
+    description: 'Capas de las 30 secciones electorales por defecto en la zona de Michoacán.',
+    center: { lat: 19.7025, lng: -101.1923 },
+    zoom: 12,
+    content: generate30SectionsKml()
   }
 ];

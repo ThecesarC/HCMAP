@@ -407,7 +407,7 @@ export default function App() {
 
       // 3. Try LocalStorage or SAMPLES fallback
       const savedKml = localStorage.getItem('persisted_kml_content');
-      if (savedKml) {
+      if (savedKml && !savedKml.includes('Secciones de Prueba México') && !savedKml.includes('Sección de Prueba 1234')) {
         loadSampleKml(savedKml, false);
       } else {
         loadSampleKml(SAMPLES[0].content, false);
@@ -888,7 +888,8 @@ export default function App() {
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
         
         {/* LEFT PANEL: Controls & Data list */}
-        <aside className="w-full md:w-[320px] flex-shrink-0 border-b md:border-b-0 md:border-r border-[#1e293b] flex flex-col bg-[#0f172a] max-h-[45vh] md:max-h-full">
+        {isAdmin && (
+          <aside className="w-full md:w-[320px] flex-shrink-0 border-b md:border-b-0 md:border-r border-[#1e293b] flex flex-col bg-[#0f172a] max-h-[45vh] md:max-h-full">
           
           {/* Sidebar Header */}
           <div className="p-4 border-b border-[#1e293b] flex items-center justify-between">
@@ -1236,6 +1237,7 @@ export default function App() {
             Visualizador de Áreas KML · {new Date().getFullYear()}
           </div>
         </aside>
+        )}
 
         {/* RIGHT PANEL: Leaflet Map & Details Overlay */}
         <main className="flex-1 relative flex flex-col min-h-0 bg-[#020617]">
