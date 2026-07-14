@@ -350,7 +350,7 @@ export default function App() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Special section filter active by default
-  const [filterSeccionesActive, setFilterSeccionesActive] = useState(false);
+  const [filterSeccionesActive, setFilterSeccionesActive] = useState(true);
 
   // Map Base Tile (Satellite by default, as requested by the user)
   const [mapBase, setMapBase] = useState<'satellite' | 'dark'>('satellite');
@@ -888,8 +888,7 @@ export default function App() {
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
         
         {/* LEFT PANEL: Controls & Data list */}
-        {isAdmin && (
-          <aside className="w-full md:w-[320px] flex-shrink-0 border-b md:border-b-0 md:border-r border-[#1e293b] flex flex-col bg-[#0f172a] max-h-[45vh] md:max-h-full">
+        <aside className="w-full md:w-[320px] flex-shrink-0 border-b md:border-b-0 md:border-r border-[#1e293b] flex flex-col bg-[#0f172a] max-h-[45vh] md:max-h-full">
           
           {/* Sidebar Header */}
           <div className="p-4 border-b border-[#1e293b] flex items-center justify-between">
@@ -986,40 +985,42 @@ export default function App() {
                 </div>
 
                 {/* Server persistence option for Admins */}
-                <div className="bg-blue-950/25 border border-blue-900/40 rounded-xl p-3.5 space-y-2.5 animate-fadeIn">
-                  <div className="flex items-center space-x-2">
-                    <Database className="w-4 h-4 text-blue-400" />
-                    <span className="text-[11px] font-bold text-slate-200 uppercase tracking-wide">Base de Datos Servidor</span>
-                  </div>
-                  <p className="text-[10px] text-slate-300 leading-normal">
-                    Como Administrador, puedes guardar este mapa en el servidor de forma que sea la capa predeterminada para todos los usuarios normales al ingresar.
-                  </p>
-                  
-                  {serverSaveMessage && (
-                    <div className={`p-2 rounded text-[10px] font-semibold leading-normal ${
-                      serverSaveMessage.type === 'success' 
-                        ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/40 animate-pulse' 
-                        : 'bg-rose-950/40 text-rose-400 border border-rose-900/40'
-                    }`}>
-                      {serverSaveMessage.text}
+                {isAdmin && (
+                  <div className="bg-blue-950/25 border border-blue-900/40 rounded-xl p-3.5 space-y-2.5 animate-fadeIn">
+                    <div className="flex items-center space-x-2">
+                      <Database className="w-4 h-4 text-blue-400" />
+                      <span className="text-[11px] font-bold text-slate-200 uppercase tracking-wide">Base de Datos Servidor</span>
                     </div>
-                  )}
-
-                  <button
-                    onClick={saveKmlToServer}
-                    disabled={isSavingToServer}
-                    className="w-full flex items-center justify-center space-x-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white font-bold py-2 px-3 rounded-lg text-xs transition cursor-pointer select-none"
-                  >
-                    {isSavingToServer ? (
-                      <span>Guardando en el Servidor...</span>
-                    ) : (
-                      <>
-                        <Upload className="w-3.5 h-3.5" />
-                        <span>Guardar en el Servidor</span>
-                      </>
+                    <p className="text-[10px] text-slate-300 leading-normal">
+                      Como Administrador, puedes guardar este mapa en el servidor de forma que sea la capa predeterminada para todos los usuarios normales al ingresar.
+                    </p>
+                    
+                    {serverSaveMessage && (
+                      <div className={`p-2 rounded text-[10px] font-semibold leading-normal ${
+                        serverSaveMessage.type === 'success' 
+                          ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/40 animate-pulse' 
+                          : 'bg-rose-950/40 text-rose-400 border border-rose-900/40'
+                      }`}>
+                        {serverSaveMessage.text}
+                      </div>
                     )}
-                  </button>
-                </div>
+
+                    <button
+                      onClick={saveKmlToServer}
+                      disabled={isSavingToServer}
+                      className="w-full flex items-center justify-center space-x-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white font-bold py-2 px-3 rounded-lg text-xs transition cursor-pointer select-none"
+                    >
+                      {isSavingToServer ? (
+                        <span>Guardando en el Servidor...</span>
+                      ) : (
+                        <>
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>Guardar en el Servidor</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
 
                 {/* Advanced coloring controls */}
                 <div className="bg-[#1e293b]/40 border border-[#334155]/60 rounded-xl p-3.5 space-y-3">
@@ -1235,7 +1236,6 @@ export default function App() {
             Visualizador de Áreas KML · {new Date().getFullYear()}
           </div>
         </aside>
-        )}
 
         {/* RIGHT PANEL: Leaflet Map & Details Overlay */}
         <main className="flex-1 relative flex flex-col min-h-0 bg-[#020617]">
