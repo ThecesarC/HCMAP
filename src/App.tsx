@@ -377,9 +377,7 @@ export default function App() {
 
   const isFakeKml = (kmlText: string | null): boolean => {
     if (!kmlText) return false;
-    return kmlText.includes('HEXAGONAL_GRID') || 
-           kmlText.includes('placemark-1211') || 
-           kmlText.includes('Cobertura predeterminada en Morelia');
+    return kmlText.includes('HEXAGONAL_GRID');
   };
 
   // Load default sample or persisted KML on mount
@@ -726,13 +724,52 @@ export default function App() {
       const text = e.target?.result as string;
       if (text) {
         loadSampleKml(text);
-        // Auto-save to Firebase Firestore so it's instantly available on other browsers/mobile
+        setIsSavingToServer(true);
+        setServerSaveMessage(null);
+        
+        let firestoreSuccess = false;
         try {
           console.log("Auto-guardando KML subido en Firestore...");
           await saveKmlToFirestore(text, currentUser?.email || 'bunkerhrv@gmail.com');
           console.log("¡KML auto-guardado en Firestore con éxito!");
+          firestoreSuccess = true;
         } catch (fErr) {
           console.error("Error al auto-guardar KML en Firestore:", fErr);
+        }
+
+        let serverSuccess = false;
+        try {
+          const res = await fetch('/api/kml', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ kmlText: text })
+          });
+          const data = await res.json();
+          if (data.success) {
+            serverSuccess = true;
+          }
+        } catch (sErr) {
+          console.warn("Error saving to local Express server:", sErr);
+        }
+
+        setIsSavingToServer(false);
+        if (firestoreSuccess) {
+          setServerSaveMessage({
+            type: 'success',
+            text: '¡KML guardado permanentemente en la Base de Datos de Firebase!'
+          });
+        } else if (serverSuccess) {
+          setServerSaveMessage({
+            type: 'success',
+            text: '¡KML guardado en el servidor local!'
+          });
+        } else {
+          setServerSaveMessage({
+            type: 'error',
+            text: 'Cargado en el mapa, pero no se pudo sincronizar en línea (revisa tu conexión).'
+          });
         }
       }
     };
