@@ -34,3 +34,12 @@ export interface KmlStyle {
   strokeColor?: string;
   strokeWidth?: number;
 }
+
+export interface SampleKml {
+  id: string;
+  name: string;
+  description: string;
+  center: { lat: number; lng: number };
+  zoom: number;
+  content: string;
+}

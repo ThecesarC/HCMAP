@@ -375,6 +375,13 @@ export default function App() {
   const [isSavingToServer, setIsSavingToServer] = useState(false);
   const [serverSaveMessage, setServerSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  const isFakeKml = (kmlText: string | null): boolean => {
+    if (!kmlText) return false;
+    return kmlText.includes('HEXAGONAL_GRID') || 
+           kmlText.includes('placemark-1211') || 
+           kmlText.includes('Cobertura predeterminada en Morelia');
+  };
+
   // Load default sample or persisted KML on mount
   useEffect(() => {
     const initKml = async () => {
@@ -382,10 +389,12 @@ export default function App() {
       try {
         console.log("Intentando cargar KML desde Firebase Firestore...");
         const firestoreKml = await getKmlFromFirestore();
-        if (firestoreKml) {
+        if (firestoreKml && !isFakeKml(firestoreKml)) {
           console.log("¡Cargado KML exitosamente desde Firestore!");
           loadSampleKml(firestoreKml, false);
           return;
+        } else if (firestoreKml && isFakeKml(firestoreKml)) {
+          console.log("Detectado KML de cuadrícula falsa en Firestore. Ignorando para permitir carga de KML original...");
         }
       } catch (fErr) {
         console.warn("No se pudo conectar a Firestore (o no existe documento aún):", fErr);
@@ -396,19 +405,21 @@ export default function App() {
         console.log("Intentando cargar KML desde el servidor API local...");
         const res = await fetch('/api/kml');
         const data = await res.json();
-        if (data.success && data.kml) {
+        if (data.success && data.kml && !isFakeKml(data.kml)) {
           console.log("Cargando KML permanente desde el servidor local");
           loadSampleKml(data.kml, false);
           return;
+        } else if (data.kml && isFakeKml(data.kml)) {
+          console.log("Detectado KML de cuadrícula falsa en el servidor local. Ignorando...");
         }
       } catch (err) {
         console.warn("Error fetching KML from local API server:", err);
       }
 
-      // 3. Try LocalStorage or SAMPLES fallback
+      // 3. Try LocalStorage
       const savedKml = localStorage.getItem('persisted_kml_content');
-      const isOldSample = savedKml && savedKml.includes('Secciones Electorales') && !savedKml.includes('ORGANIC_INTERLOCKING_GRID_V2');
-      if (savedKml && !isOldSample && !savedKml.includes('Secciones de Prueba México') && !savedKml.includes('Sección de Prueba 1234')) {
+      if (savedKml && !isFakeKml(savedKml)) {
+        console.log("Cargando KML guardado en localStorage...");
         loadSampleKml(savedKml, false);
         // Auto-sync to Firestore so it is stored in the database for all other devices
         try {
@@ -419,7 +430,13 @@ export default function App() {
           console.warn("Error al auto-sincronizar KML a Firestore:", fErr);
         }
       } else {
-        loadSampleKml(SAMPLES[0].content, false);
+        if (savedKml && isFakeKml(savedKml)) {
+          console.log("Detectado KML de cuadrícula falsa en localStorage. Limpiando para permitir carga de KML original...");
+          localStorage.removeItem('persisted_kml_content');
+          localStorage.removeItem('persisted_kml_name');
+        }
+        console.log("No se encontró KML válido en caché o base de datos. Esperando archivo KML original...");
+        setKmlDoc(null);
       }
     };
 
