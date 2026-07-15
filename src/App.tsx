@@ -696,10 +696,18 @@ export default function App() {
 
   const handleKmlFile = (file: File) => {
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       const text = e.target?.result as string;
       if (text) {
         loadSampleKml(text);
+        // Auto-save to Firebase Firestore so it's instantly available on other browsers/mobile
+        try {
+          console.log("Auto-guardando KML subido en Firestore...");
+          await saveKmlToFirestore(text, currentUser?.email || 'bunkerhrv@gmail.com');
+          console.log("¡KML auto-guardado en Firestore con éxito!");
+        } catch (fErr) {
+          console.error("Error al auto-guardar KML en Firestore:", fErr);
+        }
       }
     };
     reader.onerror = () => {
@@ -794,7 +802,10 @@ export default function App() {
   };
 
   const metrics = selectedFeature ? calculateFeatureMetrics(selectedFeature) : null;
-  const isAdmin = currentUser?.email.trim().toLowerCase() === 'hugocesarlemuscortes@gmail.com';
+  const isAdmin = currentUser && [
+    'hugocesarlemuscortes@gmail.com',
+    'bunkerhrv@gmail.com'
+  ].includes(currentUser.email.trim().toLowerCase());
 
   return (
     <div className="h-screen w-screen flex flex-col bg-[#050505] text-[#e2e8f0] overflow-hidden font-sans">
