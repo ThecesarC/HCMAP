@@ -337,6 +337,23 @@ const isFeatureAllowed = (feature: KmlFeature): boolean => {
   return ALLOWED_SECCIONES.includes(sec);
 };
 
+// Check if feature contains "ÁREA" (case-insensitive and accent-insensitive)
+const carriesArea = (feature: KmlFeature): boolean => {
+  const containsAreaWord = (str: string | null | undefined): boolean => {
+    if (!str) return false;
+    // Normalize string to remove accents and convert to lowercase
+    const normalized = str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    return normalized.includes("area");
+  };
+
+  if (containsAreaWord(feature.name)) return true;
+  if (containsAreaWord(feature.description)) return true;
+  for (const val of Object.values(feature.properties)) {
+    if (containsAreaWord(String(val))) return true;
+  }
+  return false;
+};
+
 export default function App() {
   const [kmlDoc, setKmlDoc] = useState<KmlDocument | null>(null);
   const [selectedFeature, setSelectedFeature] = useState<KmlFeature | null>(null);
@@ -534,8 +551,15 @@ export default function App() {
   // Check if current document has any 'SECCION' key
   const hasSeccionProperties = kmlDoc?.features.some(f => getSeccionValue(f) !== null) || false;
 
-  // Active features list based on Seccion filter
+  // Active features list based on Seccion filter and "ÁREA" polygon requirement
   const activeFeatures = kmlDoc?.features.filter(f => {
+    // If it is a polygon, only consider it if it carries the word "ÁREA"
+    if (f.geometryType === 'Polygon') {
+      if (!carriesArea(f)) {
+        return false;
+      }
+    }
+
     if (filterSeccionesActive && hasSeccionProperties) {
       return isFeatureAllowed(f);
     }
