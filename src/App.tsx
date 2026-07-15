@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   MapContainer, 
   TileLayer, 
@@ -11,7 +11,8 @@ import {
   Polyline, 
   CircleMarker, 
   useMap,
-  Tooltip
+  Tooltip,
+  ZoomControl
 } from 'react-leaflet';
 import L from 'leaflet';
 import { 
@@ -30,7 +31,10 @@ import {
   User,
   LogOut,
   ChevronDown,
-  Shield
+  Shield,
+  ArrowLeft,
+  MapPin,
+  ChevronRight
 } from 'lucide-react';
 import { parseKml } from './utils/kmlParser';
 import { KmlDocument, KmlFeature } from './types';
@@ -352,8 +356,8 @@ export default function App() {
   // Special section filter active by default
   const [filterSeccionesActive, setFilterSeccionesActive] = useState(true);
 
-  // Map Base Tile (Satellite by default, as requested by the user)
-  const [mapBase, setMapBase] = useState<'satellite' | 'dark'>('satellite');
+  // Map Base Tile (Streets by default, showing streets and colonies)
+  const [mapBase, setMapBase] = useState<'streets' | 'satellite' | 'dark'>('streets');
 
   // Google Account simulated states
   const [currentUser, setCurrentUser] = useState<{ email: string; name: string; avatar?: string } | null>(() => {
@@ -688,6 +692,46 @@ export default function App() {
       color: isSelected ? '#ffffff' : '#b91c1c',
       weight: isSelected ? 4 : 2.5
     };
+  };
+
+  // State and helpers for the top-left color zones / active color sections dropdown
+  const [selectedColorGroup, setSelectedColorGroup] = useState<string | null>(null);
+  const [groupSearchQuery, setGroupSearchQuery] = useState('');
+
+  const getFriendlyColorName = (hex: string): string => {
+    const upperHex = hex.toUpperCase();
+    if (upperHex === '#8B4513' || upperHex === 'SADDLEBROWN') return 'Zona Café (Marrón)';
+    if (upperHex === '#16A34A' || upperHex === '#15803D' || upperHex === 'GREEN' || upperHex === 'EMERALD') return 'Zona Verde';
+    if (upperHex === '#DC2626' || upperHex === '#991B1B' || upperHex === 'RED') return 'Zona Roja';
+    if (upperHex === '#2563EB' || upperHex === '#1D4ED8' || upperHex === 'BLUE') return 'Zona Azul';
+    if (upperHex === '#9333EA' || upperHex === '#6B21A8' || upperHex === 'PURPLE') return 'Zona Morada';
+    return `Zona ${hex}`;
+  };
+
+  // Group active features by their style color dynamically
+  const colorGroups = useMemo(() => {
+    const groups: Record<string, { color: string; friendlyName: string; features: KmlFeature[] }> = {};
+    
+    activeFeatures.forEach(f => {
+      const style = getFeatureStyle(f);
+      const color = style.fillColor || '#475569';
+      
+      if (!groups[color]) {
+        groups[color] = {
+          color: color,
+          friendlyName: getFriendlyColorName(color),
+          features: []
+        };
+      }
+      groups[color].features.push(f);
+    });
+    
+    // Sort so groups always display consistently by size or name
+    return Object.values(groups).sort((a, b) => b.features.length - a.features.length);
+  }, [activeFeatures, coloringMode, colorByProperty, randomColors]);
+
+  const preventMapAction = (e: React.MouseEvent | React.WheelEvent) => {
+    e.stopPropagation();
   };
 
   // KML parsing pipeline
@@ -1412,10 +1456,180 @@ export default function App() {
             </div>
           )}
 
+          {/* FLOATING TOP-LEFT COLOR ZONES & SECTIONS WIDGET */}
+          {activeFeatures.length > 0 && (
+            <div 
+              className="absolute top-4 left-4 z-[999] max-w-[280px] sm:max-w-[320px] w-full flex flex-col space-y-2 pointer-events-auto"
+              onMouseDown={preventMapAction}
+              onDoubleClick={preventMapAction}
+              onWheel={preventMapAction}
+            >
+              {/* Main Zone Container */}
+              <div className="bg-[#0f172a]/95 border border-[#1e293b] rounded-2xl shadow-2xl backdrop-blur-md p-3 text-slate-100">
+                <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-800">
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">Zonas por Color</h3>
+                    <p className="text-[10px] text-slate-400">Ver secciones y ubicar en mapa</p>
+                  </div>
+                  <span className="text-[10px] font-mono bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded">
+                    {colorGroups.length} Colores
+                  </span>
+                </div>
+
+                {selectedColorGroup === null ? (
+                  // List of existing color zones
+                  <div className="grid grid-cols-1 gap-2">
+                    {colorGroups.map(group => {
+                      return (
+                        <button
+                          key={group.color}
+                          onClick={() => {
+                            setSelectedColorGroup(group.color);
+                            setGroupSearchQuery('');
+                          }}
+                          className="w-full flex items-center justify-between p-2 rounded-xl border border-slate-800 hover:border-slate-700 bg-slate-900/50 hover:bg-slate-900 transition text-left group"
+                        >
+                          <div className="flex items-center space-x-2.5 min-w-0">
+                            <span 
+                              className="w-3.5 h-3.5 rounded-full border border-white/20 flex-shrink-0 shadow-sm"
+                              style={{ backgroundColor: group.color }}
+                            />
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold text-slate-200 group-hover:text-white truncate">
+                                {group.friendlyName}
+                              </p>
+                              <p className="text-[10px] text-slate-400 leading-none mt-0.5">
+                                {group.features.length} {group.features.length === 1 ? 'sección' : 'secciones'}
+                              </p>
+                            </div>
+                          </div>
+                          <ChevronRight className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-300 transition" />
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  // Expanded Color Group Detail with sections dropdown list
+                  <div className="flex flex-col space-y-2">
+                    {/* Header back button */}
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                      <button
+                        onClick={() => {
+                          setSelectedColorGroup(null);
+                          setGroupSearchQuery('');
+                        }}
+                        className="flex items-center text-[10px] font-bold text-blue-400 hover:text-blue-300 transition uppercase tracking-wider"
+                      >
+                        <ArrowLeft className="w-3.5 h-3.5 mr-1" /> Atrás
+                      </button>
+                      
+                      <div className="flex items-center space-x-1.5">
+                        <span 
+                          className="w-2.5 h-2.5 rounded-full border border-white/20 shadow-sm"
+                          style={{ backgroundColor: selectedColorGroup }}
+                        />
+                        <span className="text-[10px] font-semibold text-slate-300 max-w-[120px] truncate">
+                          {colorGroups.find(g => g.color === selectedColorGroup)?.friendlyName || 'Zona'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Search filter within this color zone */}
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-500" />
+                      <input
+                        type="text"
+                        placeholder="Buscar sección..."
+                        value={groupSearchQuery}
+                        onChange={(e) => setGroupSearchQuery(e.target.value)}
+                        className="w-full pl-8 pr-3 py-1.5 bg-slate-900 border border-slate-800 focus:border-slate-700 rounded-lg text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500/30"
+                      />
+                      {groupSearchQuery && (
+                        <button
+                          onClick={() => setGroupSearchQuery('')}
+                          className="absolute right-2.5 top-2 text-slate-500 hover:text-slate-300 text-xs font-bold px-1"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Scrollable List of Sections */}
+                    <div className="max-h-52 overflow-y-auto divide-y divide-slate-800/40 custom-scrollbar pr-0.5">
+                      {(() => {
+                        const currentGroup = colorGroups.find(g => g.color === selectedColorGroup);
+                        if (!currentGroup) return null;
+
+                        const matchedFeatures = currentGroup.features.filter(f => {
+                          const secVal = getSeccionValue(f);
+                          if (!groupSearchQuery) return true;
+                          return (secVal && secVal.toLowerCase().includes(groupSearchQuery.toLowerCase())) ||
+                                 (f.name && f.name.toLowerCase().includes(groupSearchQuery.toLowerCase()));
+                        });
+
+                        if (matchedFeatures.length === 0) {
+                          return (
+                            <div className="py-6 text-center text-[10px] text-slate-500">
+                              No se encontraron secciones.
+                            </div>
+                          );
+                        }
+
+                        return matchedFeatures.map(f => {
+                          const secVal = getSeccionValue(f);
+                          const isSelected = selectedFeature?.id === f.id;
+                          return (
+                            <button
+                              key={f.id}
+                              onClick={() => {
+                                setSelectedFeature(f);
+                                setFitBoundsTrigger(prev => prev + 1);
+                              }}
+                              className={`w-full flex items-center justify-between p-1.5 text-left transition rounded-lg text-xs ${
+                                isSelected 
+                                  ? 'bg-blue-600/20 text-blue-300 border border-blue-500/30 font-semibold' 
+                                  : 'hover:bg-slate-900 text-slate-300 hover:text-slate-100'
+                              }`}
+                            >
+                              <div className="flex items-center space-x-2 min-w-0">
+                                <MapPin className={`w-3.5 h-3.5 flex-shrink-0 ${isSelected ? 'text-blue-400' : 'text-slate-500'}`} />
+                                <div className="min-w-0">
+                                  <p className="truncate font-medium">{f.name || `Sección ${secVal}`}</p>
+                                  {secVal && secVal !== f.name && (
+                                    <p className="text-[9px] text-slate-500 leading-none mt-0.5">Sección: {secVal}</p>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-center space-x-1">
+                                <span className="text-[9px] font-mono px-1 py-0.2 bg-slate-800 rounded text-slate-400 border border-slate-700/50">
+                                  {f.geometryType === 'Polygon' ? 'Poli' : 'Punto'}
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Floating Map Controls overlay */}
           <div className="absolute top-4 right-4 z-[999] flex flex-col space-y-2">
             <div className="bg-[#0f172a]/95 border border-[#1e293b] rounded-xl p-1.5 shadow-2xl backdrop-blur-md flex items-center space-x-1">
               <span className="text-[9px] font-bold text-slate-400 px-1.5">MAPA:</span>
+              <button
+                onClick={() => setMapBase('streets')}
+                className={`px-2 py-1 rounded text-[10px] font-bold transition ${
+                  mapBase === 'streets' 
+                    ? 'bg-blue-600 text-white shadow' 
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                }`}
+              >
+                CALLES
+              </button>
               <button
                 onClick={() => setMapBase('satellite')}
                 className={`px-2 py-1 rounded text-[10px] font-bold transition ${
@@ -1445,10 +1659,17 @@ export default function App() {
               center={[19.7025, -101.1923]}
               zoom={13}
               scrollWheelZoom={true}
+              zoomControl={false}
               style={{ width: '100%', height: '100%', background: '#020617' }}
             >
               {/* Dynamic Map Base Tile Layer */}
-              {mapBase === 'satellite' ? (
+              {mapBase === 'streets' ? (
+                <TileLayer
+                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  maxZoom={19}
+                />
+              ) : mapBase === 'satellite' ? (
                 <TileLayer
                   attribution='Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
                   url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
@@ -1460,6 +1681,9 @@ export default function App() {
                   url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
                 />
               )}
+
+              {/* Positioned ZoomControl to stay clear of top-left floating card */}
+              <ZoomControl position="bottomright" />
 
               {/* Map Reactive bounds controller */}
               <MapController 
