@@ -721,16 +721,8 @@ export default function App() {
   // State and helpers for the top-left color zones / active color sections dropdown
   const [selectedColorGroup, setSelectedColorGroup] = useState<string | null>(null);
   const [groupSearchQuery, setGroupSearchQuery] = useState('');
-
-  const getFriendlyColorName = (hex: string): string => {
-    const upperHex = hex.toUpperCase();
-    if (upperHex === '#8B4513' || upperHex === 'SADDLEBROWN') return 'Zona Café (Marrón)';
-    if (upperHex === '#16A34A' || upperHex === '#15803D' || upperHex === 'GREEN' || upperHex === 'EMERALD') return 'Zona Verde';
-    if (upperHex === '#DC2626' || upperHex === '#991B1B' || upperHex === 'RED') return 'Zona Roja';
-    if (upperHex === '#2563EB' || upperHex === '#1D4ED8' || upperHex === 'BLUE') return 'Zona Azul';
-    if (upperHex === '#9333EA' || upperHex === '#6B21A8' || upperHex === 'PURPLE') return 'Zona Morada';
-    return `Zona ${hex}`;
-  };
+  const [isColorWidgetCollapsed, setIsColorWidgetCollapsed] = useState(false);
+  const [isDetailsCollapsed, setIsDetailsCollapsed] = useState(false);
 
   // Group active features by their style color dynamically
   const colorGroups = useMemo(() => {
@@ -743,15 +735,43 @@ export default function App() {
       if (!groups[color]) {
         groups[color] = {
           color: color,
-          friendlyName: getFriendlyColorName(color),
+          friendlyName: '',
           features: []
         };
       }
       groups[color].features.push(f);
     });
+
+    const getColorPriority = (hex: string): number => {
+      const upperHex = hex.toUpperCase();
+      // Verde -> Priority 1 (Brigada 1)
+      if (upperHex === '#16A34A' || upperHex === 'GREEN' || upperHex === 'EMERALD' || upperHex === '#15803D') return 1;
+      // Café -> Priority 2 (Brigada 2)
+      if (upperHex === '#8B4513' || upperHex === 'SADDLEBROWN' || upperHex === '#5C2E0B') return 2;
+      // Roja -> Priority 3 (Brigada 3)
+      if (upperHex === '#DC2626' || upperHex === 'RED' || upperHex === '#991B1B') return 3;
+      // Azul -> Priority 4 (Brigada 4)
+      if (upperHex === '#2563EB' || upperHex === 'BLUE' || upperHex === '#1D4ED8') return 4;
+      // Morada -> Priority 5 (Brigada 5)
+      if (upperHex === '#9333EA' || upperHex === 'PURPLE' || upperHex === '#6B21A8') return 5;
+      return 100; // fallback for custom/random colors
+    };
     
-    // Sort so groups always display consistently by size or name
-    return Object.values(groups).sort((a, b) => b.features.length - a.features.length);
+    // Sort so groups always display in the custom color priority sequence
+    const sortedGroups = Object.values(groups).sort((a, b) => {
+      const prioA = getColorPriority(a.color);
+      const prioB = getColorPriority(b.color);
+      if (prioA !== prioB) {
+        return prioA - prioB;
+      }
+      return b.features.length - a.features.length; // fallback
+    });
+    
+    // Assign "Brigada X" consecutively
+    return sortedGroups.map((group, index) => ({
+      ...group,
+      friendlyName: `Brigada ${index + 1}`
+    }));
   }, [activeFeatures, coloringMode, colorByProperty, randomColors]);
 
   const preventMapAction = (e: React.MouseEvent | React.WheelEvent) => {
@@ -1408,6 +1428,7 @@ export default function App() {
                           onClick={() => {
                             setSelectedFeature(f);
                             setFitBoundsTrigger(prev => prev + 1);
+                            setIsDetailsCollapsed(false);
                           }}
                           className={`w-full text-left p-2.5 rounded-lg border text-xs transition cursor-pointer flex items-center justify-between group ${
                             isSelected 
@@ -1436,6 +1457,7 @@ export default function App() {
                               e.stopPropagation();
                               setSelectedFeature(f);
                               setFitBoundsTrigger(prev => prev + 1);
+                              setIsDetailsCollapsed(false);
                             }}
                             className="p-1 text-slate-500 hover:text-blue-400 rounded transition opacity-0 group-hover:opacity-100"
                             title="Enfocar en mapa"
@@ -1483,159 +1505,191 @@ export default function App() {
           {/* FLOATING TOP-LEFT COLOR ZONES & SECTIONS WIDGET */}
           {activeFeatures.length > 0 && (
             <div 
-              className="absolute top-4 left-4 z-[999] max-w-[280px] sm:max-w-[320px] w-full flex flex-col space-y-2 pointer-events-auto"
+              className="absolute top-4 left-4 z-[999] max-w-[200px] xs:max-w-[230px] sm:max-w-[300px] md:max-w-[320px] w-full flex flex-col space-y-1.5 pointer-events-auto"
               onMouseDown={preventMapAction}
               onDoubleClick={preventMapAction}
               onWheel={preventMapAction}
             >
               {/* Main Zone Container */}
-              <div className="bg-[#0f172a]/95 border border-[#1e293b] rounded-2xl shadow-2xl backdrop-blur-md p-3 text-slate-100">
-                <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-800">
-                  <div>
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">Zonas por Color</h3>
-                    <p className="text-[10px] text-slate-400">Ver secciones y ubicar en mapa</p>
+              <div className="bg-[#0f172a]/95 border border-[#1e293b] rounded-2xl shadow-2xl backdrop-blur-md p-2 sm:p-3 text-slate-100 transition-all duration-300">
+                <div 
+                  className="flex items-center justify-between cursor-pointer select-none"
+                  onClick={() => setIsColorWidgetCollapsed(!isColorWidgetCollapsed)}
+                >
+                  <div className="min-w-0 pr-1">
+                    <h3 className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1">
+                      <span>Brigadas</span>
+                      <ChevronDown className={`w-3 h-3 sm:w-3.5 h-3.5 text-slate-400 transition-transform duration-300 ${isColorWidgetCollapsed ? '' : 'rotate-180'}`} />
+                    </h3>
+                    {!isColorWidgetCollapsed && (
+                      <p className="text-[8px] sm:text-[10px] text-slate-400 truncate">Ver secciones por brigada</p>
+                    )}
                   </div>
-                  <span className="text-[10px] font-mono bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded">
-                    {colorGroups.length} Colores
-                  </span>
+                  <div className="flex items-center space-x-1.5 flex-shrink-0">
+                    {isColorWidgetCollapsed ? (
+                      <div className="flex -space-x-1 overflow-hidden">
+                        {colorGroups.slice(0, 4).map(group => (
+                          <span 
+                            key={group.color}
+                            className="w-2 h-2 rounded-full border border-slate-900 inline-block shadow-sm"
+                            style={{ backgroundColor: group.color }}
+                          />
+                        ))}
+                        {colorGroups.length > 4 && (
+                          <span className="text-[8px] font-semibold text-slate-400 pl-1 leading-none self-center">
+                            +{colorGroups.length - 4}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-[8px] sm:text-[10px] font-mono bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded">
+                        {colorGroups.length} {colorGroups.length === 1 ? 'Brigada' : 'Brigadas'}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
-                {selectedColorGroup === null ? (
-                  // List of existing color zones
-                  <div className="grid grid-cols-1 gap-2">
-                    {colorGroups.map(group => {
-                      return (
+                {/* Collapsible Body with Smooth Transition */}
+                <div className={`transition-all duration-300 overflow-hidden ${isColorWidgetCollapsed ? 'max-h-0 mt-0 opacity-0' : 'max-h-[350px] sm:max-h-[420px] mt-2 pt-2 border-t border-slate-800 opacity-100'}`}>
+                  {selectedColorGroup === null ? (
+                    // List of existing color zones
+                    <div className="grid grid-cols-1 gap-1 sm:gap-2 max-h-52 overflow-y-auto custom-scrollbar pr-0.5">
+                      {colorGroups.map(group => {
+                        return (
+                          <button
+                            key={group.color}
+                            onClick={() => {
+                              setSelectedColorGroup(group.color);
+                              setGroupSearchQuery('');
+                            }}
+                            className="w-full flex items-center justify-between p-1.5 sm:p-2 rounded-lg sm:rounded-xl border border-slate-800 hover:border-slate-700 bg-slate-900/50 hover:bg-slate-900 transition text-left group"
+                          >
+                            <div className="flex items-center space-x-1.5 sm:space-x-2.5 min-w-0">
+                              <span 
+                                className="w-2.5 h-2.5 sm:w-3.5 h-3.5 rounded-full border border-white/20 flex-shrink-0 shadow-sm"
+                                style={{ backgroundColor: group.color }}
+                              />
+                              <div className="min-w-0">
+                                <p className="text-[10px] sm:text-xs font-semibold text-slate-200 group-hover:text-white truncate">
+                                  {group.friendlyName}
+                                </p>
+                                <p className="text-[8px] sm:text-[10px] text-slate-400 leading-none mt-0.5">
+                                  {group.features.length} {group.features.length === 1 ? 'sección' : 'secciones'}
+                                </p>
+                              </div>
+                            </div>
+                            <ChevronRight className="w-3 h-3 sm:w-3.5 h-3.5 text-slate-500 group-hover:text-slate-300 transition" />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    // Expanded Color Group Detail with sections dropdown list
+                    <div className="flex flex-col space-y-1.5 sm:space-y-2">
+                      {/* Header back button */}
+                      <div className="flex items-center justify-between border-b border-slate-800/60 pb-1.5">
                         <button
-                          key={group.color}
                           onClick={() => {
-                            setSelectedColorGroup(group.color);
+                            setSelectedColorGroup(null);
                             setGroupSearchQuery('');
                           }}
-                          className="w-full flex items-center justify-between p-2 rounded-xl border border-slate-800 hover:border-slate-700 bg-slate-900/50 hover:bg-slate-900 transition text-left group"
+                          className="flex items-center text-[8px] sm:text-[10px] font-bold text-blue-400 hover:text-blue-300 transition uppercase tracking-wider"
                         >
-                          <div className="flex items-center space-x-2.5 min-w-0">
-                            <span 
-                              className="w-3.5 h-3.5 rounded-full border border-white/20 flex-shrink-0 shadow-sm"
-                              style={{ backgroundColor: group.color }}
-                            />
-                            <div className="min-w-0">
-                              <p className="text-xs font-semibold text-slate-200 group-hover:text-white truncate">
-                                {group.friendlyName}
-                              </p>
-                              <p className="text-[10px] text-slate-400 leading-none mt-0.5">
-                                {group.features.length} {group.features.length === 1 ? 'sección' : 'secciones'}
-                              </p>
-                            </div>
-                          </div>
-                          <ChevronRight className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-300 transition" />
+                          <ArrowLeft className="w-3 h-3 sm:w-3.5 h-3.5 mr-1" /> Atrás
                         </button>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  // Expanded Color Group Detail with sections dropdown list
-                  <div className="flex flex-col space-y-2">
-                    {/* Header back button */}
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
-                      <button
-                        onClick={() => {
-                          setSelectedColorGroup(null);
-                          setGroupSearchQuery('');
-                        }}
-                        className="flex items-center text-[10px] font-bold text-blue-400 hover:text-blue-300 transition uppercase tracking-wider"
-                      >
-                        <ArrowLeft className="w-3.5 h-3.5 mr-1" /> Atrás
-                      </button>
-                      
-                      <div className="flex items-center space-x-1.5">
-                        <span 
-                          className="w-2.5 h-2.5 rounded-full border border-white/20 shadow-sm"
-                          style={{ backgroundColor: selectedColorGroup }}
+                        
+                        <div className="flex items-center space-x-1 sm:space-x-1.5">
+                          <span 
+                            className="w-2 h-2 sm:w-2.5 h-2.5 rounded-full border border-white/20 shadow-sm"
+                            style={{ backgroundColor: selectedColorGroup }}
+                          />
+                          <span className="text-[9px] sm:text-[10px] font-semibold text-slate-300 max-w-[90px] sm:max-w-[120px] truncate">
+                            {colorGroups.find(g => g.color === selectedColorGroup)?.friendlyName || 'Brigada'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Search filter within this color zone */}
+                      <div className="relative">
+                        <Search className="absolute left-2 top-2 h-3 w-3 sm:h-3.5 sm:w-3.5 text-slate-500" />
+                        <input
+                          type="text"
+                          placeholder="Buscar sección..."
+                          value={groupSearchQuery}
+                          onChange={(e) => setGroupSearchQuery(e.target.value)}
+                          className="w-full pl-6 pr-2 py-1 bg-slate-900 border border-slate-800 focus:border-slate-700 rounded-md sm:rounded-lg text-[10px] sm:text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500/30"
                         />
-                        <span className="text-[10px] font-semibold text-slate-300 max-w-[120px] truncate">
-                          {colorGroups.find(g => g.color === selectedColorGroup)?.friendlyName || 'Zona'}
-                        </span>
+                        {groupSearchQuery && (
+                          <button
+                            onClick={() => setGroupSearchQuery('')}
+                            className="absolute right-2 top-1 text-slate-500 hover:text-slate-300 text-[10px] font-bold px-1"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Scrollable List of Sections */}
+                      <div className="max-h-36 sm:max-h-52 overflow-y-auto divide-y divide-slate-800/40 custom-scrollbar pr-0.5">
+                        {(() => {
+                          const currentGroup = colorGroups.find(g => g.color === selectedColorGroup);
+                          if (!currentGroup) return null;
+
+                          const matchedFeatures = currentGroup.features.filter(f => {
+                            const secVal = getSeccionValue(f);
+                            if (!groupSearchQuery) return true;
+                            return (secVal && secVal.toLowerCase().includes(groupSearchQuery.toLowerCase())) ||
+                                   (f.name && f.name.toLowerCase().includes(groupSearchQuery.toLowerCase()));
+                          });
+
+                          if (matchedFeatures.length === 0) {
+                            return (
+                              <div className="py-4 text-center text-[9px] sm:text-[10px] text-slate-500">
+                                No se encontraron secciones.
+                              </div>
+                            );
+                          }
+
+                          return matchedFeatures.map(f => {
+                            const secVal = getSeccionValue(f);
+                            const isSelected = selectedFeature?.id === f.id;
+                            return (
+                              <button
+                                key={f.id}
+                                onClick={() => {
+                                  setSelectedFeature(f);
+                                  setFitBoundsTrigger(prev => prev + 1);
+                                  setIsColorWidgetCollapsed(true); // Automatically collapse widget on click to keep screen clean!
+                                  setIsDetailsCollapsed(true); // Automatically collapse details too so it doesn't block!
+                                }}
+                                className={`w-full flex items-center justify-between p-1 sm:p-1.5 text-left transition rounded-md text-[10px] sm:text-xs ${
+                                  isSelected 
+                                    ? 'bg-blue-600/20 text-blue-300 border border-blue-500/30 font-semibold' 
+                                    : 'hover:bg-slate-900 text-slate-300 hover:text-slate-100'
+                                }`}
+                              >
+                                <div className="flex items-center space-x-1.5 sm:space-x-2 min-w-0">
+                                  <MapPin className={`w-3 h-3 sm:w-3.5 sm:h-3.5 flex-shrink-0 ${isSelected ? 'text-blue-400' : 'text-slate-500'}`} />
+                                  <div className="min-w-0">
+                                    <p className="truncate font-medium">{f.name || `Sección ${secVal}`}</p>
+                                    {secVal && secVal !== f.name && (
+                                      <p className="text-[8px] sm:text-[9px] text-slate-500 leading-none mt-0.5">Sección: {secVal}</p>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex items-center space-x-1 flex-shrink-0">
+                                  <span className="text-[8px] font-mono px-1 py-0.2 bg-slate-800 rounded text-slate-400 border border-slate-700/50">
+                                    {f.geometryType === 'Polygon' ? 'Poli' : 'Punto'}
+                                  </span>
+                                </div>
+                              </button>
+                            );
+                          });
+                        })()}
                       </div>
                     </div>
-
-                    {/* Search filter within this color zone */}
-                    <div className="relative">
-                      <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-500" />
-                      <input
-                        type="text"
-                        placeholder="Buscar sección..."
-                        value={groupSearchQuery}
-                        onChange={(e) => setGroupSearchQuery(e.target.value)}
-                        className="w-full pl-8 pr-3 py-1.5 bg-slate-900 border border-slate-800 focus:border-slate-700 rounded-lg text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500/30"
-                      />
-                      {groupSearchQuery && (
-                        <button
-                          onClick={() => setGroupSearchQuery('')}
-                          className="absolute right-2.5 top-2 text-slate-500 hover:text-slate-300 text-xs font-bold px-1"
-                        >
-                          ✕
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Scrollable List of Sections */}
-                    <div className="max-h-52 overflow-y-auto divide-y divide-slate-800/40 custom-scrollbar pr-0.5">
-                      {(() => {
-                        const currentGroup = colorGroups.find(g => g.color === selectedColorGroup);
-                        if (!currentGroup) return null;
-
-                        const matchedFeatures = currentGroup.features.filter(f => {
-                          const secVal = getSeccionValue(f);
-                          if (!groupSearchQuery) return true;
-                          return (secVal && secVal.toLowerCase().includes(groupSearchQuery.toLowerCase())) ||
-                                 (f.name && f.name.toLowerCase().includes(groupSearchQuery.toLowerCase()));
-                        });
-
-                        if (matchedFeatures.length === 0) {
-                          return (
-                            <div className="py-6 text-center text-[10px] text-slate-500">
-                              No se encontraron secciones.
-                            </div>
-                          );
-                        }
-
-                        return matchedFeatures.map(f => {
-                          const secVal = getSeccionValue(f);
-                          const isSelected = selectedFeature?.id === f.id;
-                          return (
-                            <button
-                              key={f.id}
-                              onClick={() => {
-                                setSelectedFeature(f);
-                                setFitBoundsTrigger(prev => prev + 1);
-                              }}
-                              className={`w-full flex items-center justify-between p-1.5 text-left transition rounded-lg text-xs ${
-                                isSelected 
-                                  ? 'bg-blue-600/20 text-blue-300 border border-blue-500/30 font-semibold' 
-                                  : 'hover:bg-slate-900 text-slate-300 hover:text-slate-100'
-                              }`}
-                            >
-                              <div className="flex items-center space-x-2 min-w-0">
-                                <MapPin className={`w-3.5 h-3.5 flex-shrink-0 ${isSelected ? 'text-blue-400' : 'text-slate-500'}`} />
-                                <div className="min-w-0">
-                                  <p className="truncate font-medium">{f.name || `Sección ${secVal}`}</p>
-                                  {secVal && secVal !== f.name && (
-                                    <p className="text-[9px] text-slate-500 leading-none mt-0.5">Sección: {secVal}</p>
-                                  )}
-                                </div>
-                              </div>
-                              <div className="flex items-center space-x-1">
-                                <span className="text-[9px] font-mono px-1 py-0.2 bg-slate-800 rounded text-slate-400 border border-slate-700/50">
-                                  {f.geometryType === 'Polygon' ? 'Poli' : 'Punto'}
-                                </span>
-                              </div>
-                            </button>
-                          );
-                        });
-                      })()}
-                    </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -1744,6 +1798,7 @@ export default function App() {
                           click: () => {
                             setSelectedFeature(f);
                             setFitBoundsTrigger(prev => prev + 1);
+                            setIsDetailsCollapsed(false);
                           }
                         }}
                       >
@@ -1777,6 +1832,7 @@ export default function App() {
                           click: () => {
                             setSelectedFeature(f);
                             setFitBoundsTrigger(prev => prev + 1);
+                            setIsDetailsCollapsed(false);
                           }
                         }}
                       />
@@ -1801,6 +1857,7 @@ export default function App() {
                         click: () => {
                           setSelectedFeature(f);
                           setFitBoundsTrigger(prev => prev + 1);
+                          setIsDetailsCollapsed(false);
                         }
                       }}
                     />
@@ -1814,115 +1871,131 @@ export default function App() {
 
           {/* Bottom Property Overlay Details Panel */}
           {selectedFeature && (
-            <div className="absolute bottom-4 right-4 left-4 md:left-auto md:w-96 max-h-[75%] bg-[#0f172a]/95 border border-[#1e293b] rounded-2xl p-4 shadow-2xl flex flex-col space-y-4 backdrop-blur-md animate-slideUp z-[999] overflow-hidden">
+            <div 
+              className={`absolute bottom-4 right-4 left-4 md:left-auto md:w-96 bg-[#0f172a]/95 border border-[#1e293b] rounded-2xl p-3 sm:p-4 shadow-2xl flex flex-col backdrop-blur-md transition-all duration-300 z-[999] overflow-hidden ${
+                isDetailsCollapsed ? 'max-h-[58px] sm:max-h-[64px] space-y-0' : 'max-h-[75%] space-y-3 sm:space-y-4'
+              }`}
+            >
               
               {/* Header */}
-              <div className="flex items-start justify-between">
-                <div className="flex items-center space-x-2.5">
-                  <span className="p-2 bg-[#3b82f6]/10 text-[#3b82f6] border border-[#3b82f6]/20 rounded-xl">
-                    {selectedFeature.geometryType === 'Polygon' ? <Grid className="w-4 h-4" /> : <Database className="w-4 h-4" />}
+              <div className="flex items-center justify-between">
+                <div 
+                  className="flex items-center space-x-2 sm:space-x-2.5 cursor-pointer select-none min-w-0 flex-1 pr-2 group"
+                  onClick={() => setIsDetailsCollapsed(!isDetailsCollapsed)}
+                >
+                  <span className="p-1.5 sm:p-2 bg-[#3b82f6]/10 text-[#3b82f6] border border-[#3b82f6]/20 rounded-xl flex-shrink-0 transition group-hover:bg-[#3b82f6]/20">
+                    {selectedFeature.geometryType === 'Polygon' ? <Grid className="w-3.5 h-3.5 sm:w-4 h-4" /> : <Database className="w-3.5 h-3.5 sm:w-4 h-4" />}
                   </span>
-                  <div>
-                    <h3 className="font-bold text-slate-100 text-sm truncate leading-tight w-60">{selectedFeature.name}</h3>
-                    <p className="text-[10px] text-slate-400">
-                      Tipo de elemento: <span className="font-mono text-blue-400 font-bold">{selectedFeature.geometryType}</span>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-bold text-slate-100 text-xs sm:text-sm truncate leading-tight flex items-center gap-1 sm:gap-1.5 w-full">
+                      <span className="truncate">{selectedFeature.name}</span>
+                      <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-300 flex-shrink-0 ${isDetailsCollapsed ? '' : 'rotate-180'}`} />
+                    </h3>
+                    <p className="text-[8px] sm:text-[10px] text-slate-400 truncate leading-none mt-0.5 sm:mt-1">
+                      {isDetailsCollapsed ? 'Clic para ver características' : `Tipo de elemento: ${selectedFeature.geometryType}`}
                     </p>
                   </div>
                 </div>
                 <button 
                   onClick={() => setSelectedFeature(null)}
-                  className="text-slate-400 hover:text-white transition p-1 bg-slate-800/50 hover:bg-slate-800 rounded-lg"
+                  className="text-slate-400 hover:text-white transition p-1 bg-slate-800/50 hover:bg-slate-800 rounded-lg flex-shrink-0"
+                  title="Cerrar ventana"
                 >
+                  <span className="sr-only">Cerrar</span>
                   ✕
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto space-y-4 pr-0.5">
-                
-                {/* Description */}
-                {selectedFeature.description && (
-                  <div className="p-3 bg-slate-950/60 border border-slate-900 rounded-xl text-slate-300 text-xs leading-relaxed max-h-24 overflow-y-auto">
-                    <p className="font-bold text-[#64748b] text-[9px] uppercase tracking-wider mb-1 flex items-center space-x-1">
-                      <Info className="w-3 h-3 text-blue-400" />
-                      <span>Descripción</span>
-                    </p>
-                    {selectedFeature.description}
-                  </div>
-                )}
-
-                {/* Calculated geodetic metrics */}
-                {metrics && (
-                  <div className="grid grid-cols-2 gap-2">
-                    {metrics.areaHectares && (
-                      <div className="p-2.5 bg-slate-950/40 border border-slate-900 rounded-xl flex flex-col">
-                        <span className="text-[9px] text-[#64748b] font-bold uppercase tracking-wider">Área calculada</span>
-                        <span className="text-sm font-extrabold text-[#3b82f6] mt-1">{metrics.areaHectares} ha</span>
-                        <span className="text-[9px] text-slate-400 font-mono mt-0.5">{metrics.areaSqKm} km²</span>
+              {!isDetailsCollapsed && (
+                <>
+                  <div className="flex-1 overflow-y-auto space-y-3 sm:space-y-4 pr-0.5 custom-scrollbar">
+                    
+                    {/* Description */}
+                    {selectedFeature.description && (
+                      <div className="p-2 sm:p-3 bg-slate-950/60 border border-slate-900 rounded-xl text-slate-300 text-[11px] sm:text-xs leading-relaxed max-h-20 sm:max-h-24 overflow-y-auto custom-scrollbar">
+                        <p className="font-bold text-[#64748b] text-[8px] sm:text-[9px] uppercase tracking-wider mb-1 flex items-center space-x-1">
+                          <Info className="w-3 h-3 text-blue-400" />
+                          <span>Descripción</span>
+                        </p>
+                        {selectedFeature.description}
                       </div>
                     )}
-                    {metrics.lengthKm && (
-                      <div className="p-2.5 bg-slate-950/40 border border-slate-900 rounded-xl flex flex-col">
-                        <span className="text-[9px] text-[#64748b] font-bold uppercase tracking-wider">
-                          {selectedFeature.geometryType === 'Polygon' ? 'Perímetro' : 'Longitud'}
-                        </span>
-                        <span className="text-sm font-extrabold text-[#3b82f6] mt-1">
-                          {parseFloat(metrics.lengthKm) < 1.0 ? `${metrics.lengthMeters} m` : `${metrics.lengthKm} km`}
-                        </span>
-                        <span className="text-[9px] text-slate-400 font-mono mt-0.5">En metros: {metrics.lengthMeters}</span>
+
+                    {/* Calculated geodetic metrics */}
+                    {metrics && (
+                      <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
+                        {metrics.areaHectares && (
+                          <div className="p-2 sm:p-2.5 bg-slate-950/40 border border-slate-900 rounded-xl flex flex-col">
+                            <span className="text-[8px] sm:text-[9px] text-[#64748b] font-bold uppercase tracking-wider">Área calculada</span>
+                            <span className="text-xs sm:text-sm font-extrabold text-[#3b82f6] mt-0.5 sm:mt-1">{metrics.areaHectares} ha</span>
+                            <span className="text-[8px] sm:text-[9px] text-slate-400 font-mono mt-0.5">{metrics.areaSqKm} km²</span>
+                          </div>
+                        )}
+                        {metrics.lengthKm && (
+                          <div className="p-2 sm:p-2.5 bg-slate-950/40 border border-slate-900 rounded-xl flex flex-col">
+                            <span className="text-[8px] sm:text-[9px] text-[#64748b] font-bold uppercase tracking-wider">
+                              {selectedFeature.geometryType === 'Polygon' ? 'Perímetro' : 'Longitud'}
+                            </span>
+                            <span className="text-xs sm:text-sm font-extrabold text-[#3b82f6] mt-0.5 sm:mt-1">
+                              {parseFloat(metrics.lengthKm) < 1.0 ? `${metrics.lengthMeters} m` : `${metrics.lengthKm} km`}
+                            </span>
+                            <span className="text-[8px] sm:text-[9px] text-slate-400 font-mono mt-0.5">En metros: {metrics.lengthMeters}</span>
+                          </div>
+                        )}
+                        <div className="p-2 sm:p-2.5 bg-slate-950/40 border border-slate-900 rounded-xl flex flex-col col-span-2">
+                          <span className="text-[8px] sm:text-[9px] text-[#64748b] font-bold uppercase tracking-wider">Complejidad geométrica</span>
+                          <span className="text-[10px] sm:text-xs font-semibold text-slate-200 mt-0.5">{metrics.vertices} coordenadas geográficas</span>
+                        </div>
                       </div>
                     )}
-                    <div className="p-2.5 bg-slate-950/40 border border-slate-900 rounded-xl flex flex-col col-span-2">
-                      <span className="text-[9px] text-[#64748b] font-bold uppercase tracking-wider">Complejidad geométrica</span>
-                      <span className="text-xs font-semibold text-slate-200 mt-0.5">{metrics.vertices} coordenadas geográficas</span>
+
+                    {/* Attribute viewer */}
+                    <div className="space-y-1.5">
+                      <p className="text-[8px] sm:text-[9px] font-bold text-[#64748b] uppercase tracking-wider flex items-center space-x-1">
+                        <Database className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-blue-400" />
+                        <span>Propiedades del KML ({Object.keys(selectedFeature.properties).length})</span>
+                      </p>
+                      {Object.keys(selectedFeature.properties).length > 0 ? (
+                        <div className="border border-slate-900 rounded-xl overflow-hidden text-[10px] sm:text-xs">
+                          <div className="max-h-36 sm:max-h-48 overflow-y-auto custom-scrollbar">
+                            <table className="w-full text-left border-collapse">
+                              <thead>
+                                <tr className="bg-slate-950/80 border-b border-slate-900">
+                                  <th className="p-1.5 sm:p-2 text-[8px] sm:text-[9px] font-bold text-[#64748b] uppercase">Clave</th>
+                                  <th className="p-1.5 sm:p-2 text-[8px] sm:text-[9px] font-bold text-[#64748b] uppercase">Valor</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-900">
+                                {Object.entries(selectedFeature.properties).map(([key, val]) => (
+                                  <tr key={key} className="hover:bg-[#1e293b]/40 transition">
+                                    <td className="p-1.5 sm:p-2 font-mono text-[9px] sm:text-[10px] text-blue-400 font-semibold break-all w-1/3">{key}</td>
+                                    <td className="p-1.5 sm:p-2 text-slate-300 break-all">{val}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="p-3 text-center border border-dashed border-slate-900 rounded-xl text-[9px] sm:text-[10px] text-slate-500">
+                          Este elemento no contiene atributos estructurados de metadatos.
+                        </div>
+                      )}
                     </div>
                   </div>
-                )}
 
-                {/* Attribute viewer */}
-                <div className="space-y-2">
-                  <p className="text-[9px] font-bold text-[#64748b] uppercase tracking-wider flex items-center space-x-1">
-                    <Database className="w-3.5 h-3.5 text-blue-400" />
-                    <span>Propiedades del KML ({Object.keys(selectedFeature.properties).length})</span>
-                  </p>
-                  {Object.keys(selectedFeature.properties).length > 0 ? (
-                    <div className="border border-slate-900 rounded-xl overflow-hidden text-xs">
-                      <div className="max-h-48 overflow-y-auto">
-                        <table className="w-full text-left border-collapse">
-                          <thead>
-                            <tr className="bg-slate-950/80 border-b border-slate-900">
-                              <th className="p-2 text-[9px] font-bold text-[#64748b] uppercase">Clave</th>
-                              <th className="p-2 text-[9px] font-bold text-[#64748b] uppercase">Valor</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-900">
-                            {Object.entries(selectedFeature.properties).map(([key, val]) => (
-                              <tr key={key} className="hover:bg-[#1e293b]/40 transition">
-                                <td className="p-2 font-mono text-[10px] text-blue-400 font-semibold break-all w-1/3">{key}</td>
-                                <td className="p-2 text-slate-300 break-all">{val}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="p-3 text-center border border-dashed border-slate-900 rounded-xl text-[10px] text-slate-500">
-                      Este elemento no contiene atributos estructurados de metadatos.
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Focus action */}
-              <div className="pt-2 border-t border-[#1e293b] flex gap-2">
-                <button 
-                  onClick={() => setFitBoundsTrigger(prev => prev + 1)}
-                  className="flex-1 py-2 px-3 bg-[#3b82f6] hover:bg-blue-500 text-white font-semibold text-xs rounded-lg transition flex items-center justify-center space-x-1.5"
-                >
-                  <Compass className="w-3.5 h-3.5" />
-                  <span>Enfocar en Mapa</span>
-                </button>
-              </div>
+                  {/* Focus action */}
+                  <div className="pt-2 border-t border-[#1e293b] flex gap-2">
+                    <button 
+                      onClick={() => setFitBoundsTrigger(prev => prev + 1)}
+                      className="flex-1 py-1.5 sm:py-2 px-3 bg-[#3b82f6] hover:bg-blue-500 text-white font-semibold text-[10px] sm:text-xs rounded-lg transition flex items-center justify-center space-x-1.5"
+                    >
+                      <Compass className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                      <span>Enfocar en Mapa</span>
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           )}
         </main>
