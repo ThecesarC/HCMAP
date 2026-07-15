@@ -409,6 +409,14 @@ export default function App() {
       const savedKml = localStorage.getItem('persisted_kml_content');
       if (savedKml && !savedKml.includes('Secciones de Prueba México') && !savedKml.includes('Sección de Prueba 1234')) {
         loadSampleKml(savedKml, false);
+        // Auto-sync to Firestore so it is stored in the database for all other devices
+        try {
+          console.log("Auto-sincronizando KML de localStorage a Firebase Firestore...");
+          await saveKmlToFirestore(savedKml, currentUser?.email || 'bunkerhrv@gmail.com');
+          console.log("¡KML de localStorage auto-sincronizado exitosamente!");
+        } catch (fErr) {
+          console.warn("Error al auto-sincronizar KML a Firestore:", fErr);
+        }
       } else {
         loadSampleKml(SAMPLES[0].content, false);
       }
