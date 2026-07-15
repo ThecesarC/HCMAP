@@ -544,6 +544,86 @@ export default function App() {
   const getFeatureStyle = (feature: KmlFeature) => {
     const isSelected = selectedFeature?.id === feature.id;
 
+    // Specific brown sections requested by the user: 2802, 2804, 2805, 1008
+    const secVal = getSeccionValue(feature);
+    const isBrownSection = secVal && ['2802', '2804', '2805', '1008'].includes(secVal);
+
+    if (isBrownSection) {
+      const brownFill = '#8B4513'; // SaddleBrown
+      const brownBorder = '#5C2E0B'; // Dark Brown
+      return {
+        fillColor: brownFill,
+        fillOpacity: isSelected ? 0.75 : 0.45,
+        color: isSelected ? '#ffffff' : brownBorder,
+        weight: isSelected ? 4 : 2.5
+      };
+    }
+
+    // Specific green sections requested by the user: 1145, 1148, 1149, 1151, 1152, 1153, 1161, 2809, 2810, 2811, 2814, 2815, 2776, 1047
+    const isGreenSection = secVal && [
+      '1145', '1148', '1149', '1151', '1152', '1153', '1161', 
+      '2809', '2810', '2811', '2814', '2815', '2776', '1047'
+    ].includes(secVal);
+
+    if (isGreenSection) {
+      const greenFill = '#16a34a'; // Emerald/Green 600
+      const greenBorder = '#15803d'; // Darker Green
+      return {
+        fillColor: greenFill,
+        fillOpacity: isSelected ? 0.75 : 0.45,
+        color: isSelected ? '#ffffff' : greenBorder,
+        weight: isSelected ? 4 : 2.5
+      };
+    }
+
+    // Specific red sections requested by the user: 2729, 1211, 1019, 2721
+    const isRedSection = secVal && [
+      '2729', '1211', '1019', '2721'
+    ].includes(secVal);
+
+    if (isRedSection) {
+      const redFill = '#dc2626'; // Red 600
+      const redBorder = '#991b1b'; // Darker Red
+      return {
+        fillColor: redFill,
+        fillOpacity: isSelected ? 0.75 : 0.45,
+        color: isSelected ? '#ffffff' : redBorder,
+        weight: isSelected ? 4 : 2.5
+      };
+    }
+
+    // Specific blue sections requested by the user: 1022, 1210, 2748
+    const isBlueSection = secVal && [
+      '1022', '1210', '2748'
+    ].includes(secVal);
+
+    if (isBlueSection) {
+      const blueFill = '#2563eb'; // Blue 600
+      const blueBorder = '#1d4ed8'; // Darker Blue
+      return {
+        fillColor: blueFill,
+        fillOpacity: isSelected ? 0.75 : 0.45,
+        color: isSelected ? '#ffffff' : blueBorder,
+        weight: isSelected ? 4 : 2.5
+      };
+    }
+
+    // Specific purple sections requested by the user: 1052, 1060, 1061, 1141, 1142
+    const isPurpleSection = secVal && [
+      '1052', '1060', '1061', '1141', '1142'
+    ].includes(secVal);
+
+    if (isPurpleSection) {
+      const purpleFill = '#9333ea'; // Purple 600
+      const purpleBorder = '#6b21a8'; // Darker Purple
+      return {
+        fillColor: purpleFill,
+        fillOpacity: isSelected ? 0.75 : 0.45,
+        color: isSelected ? '#ffffff' : purpleBorder,
+        weight: isSelected ? 4 : 2.5
+      };
+    }
+
     if (coloringMode === 'random') {
       const color = randomColors[feature.id] || '#3b82f6';
       return {
@@ -1348,7 +1428,7 @@ export default function App() {
                             direction="center" 
                             className="leaflet-tooltip-own"
                           >
-                            Sección {sectionVal}
+                            {sectionVal}
                           </Tooltip>
                         )}
                       </Polygon>
