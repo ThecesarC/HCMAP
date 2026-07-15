@@ -26,10 +26,32 @@ const generate30SectionsKml = (): string => {
     const col = k % 5;
     const centerLat = 19.7025 + (row - 2.5) * 0.015;
     const centerLng = -101.1923 + (col - 2) * 0.018;
-    const minLat = centerLat - 0.006;
-    const maxLat = centerLat + 0.006;
-    const minLng = centerLng - 0.007;
-    const maxLng = centerLng + 0.007;
+    
+    // Deterministic organic polygon generation (6-sided irregular shapes)
+    const numPoints = 6;
+    const points: string[] = [];
+    const baseRadiusLat = 0.0075;
+    const baseRadiusLng = 0.009;
+    
+    const seed = parseInt(sec) || k;
+    const rand = (i: number) => {
+      const x = Math.sin(seed + i * 3) * 10000;
+      return x - Math.floor(x);
+    };
+
+    for (let i = 0; i < numPoints; i++) {
+      const angle = (i / numPoints) * 2 * Math.PI;
+      // Add organic jitter to make the boundaries look like real administrative borders
+      const angleJitter = (rand(i * 2) - 0.5) * 0.18;
+      const radiusJitter = 0.72 + rand(i * 2 + 1) * 0.55; // Multiplier from 0.72 to 1.27
+      
+      const ptLat = centerLat + Math.sin(angle + angleJitter) * baseRadiusLat * radiusJitter;
+      const ptLng = centerLng + Math.cos(angle + angleJitter) * baseRadiusLng * radiusJitter;
+      points.push(`${ptLng},${ptLat}`);
+    }
+    // Close the polygon by adding the first point again
+    points.push(points[0]);
+    const coordinatesStr = points.join(' ');
     
     placemarks += `    <Placemark id="placemark-${sec}">
       <name>Sección ${sec}</name>
@@ -44,7 +66,7 @@ const generate30SectionsKml = (): string => {
         <outerBoundaryIs>
           <LinearRing>
             <coordinates>
-              ${minLng},${minLat} ${maxLng},${minLat} ${maxLng},${maxLat} ${minLng},${maxLat} ${minLng},${minLat}
+              ${coordinatesStr}
             </coordinates>
           </LinearRing>
         </outerBoundaryIs>

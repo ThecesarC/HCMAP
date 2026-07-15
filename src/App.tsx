@@ -811,8 +811,7 @@ export default function App() {
 
   const metrics = selectedFeature ? calculateFeatureMetrics(selectedFeature) : null;
   const isAdmin = currentUser && [
-    'hugocesarlemuscortes@gmail.com',
-    'bunkerhrv@gmail.com'
+    'hugocesarlemuscortes@gmail.com'
   ].includes(currentUser.email.trim().toLowerCase());
 
   return (
@@ -882,90 +881,94 @@ export default function App() {
                 )}
               </div>
 
-              {/* Account Quick Switch */}
-              <div className="py-3 space-y-2 border-b border-slate-800">
-                <p className="text-[9px] uppercase font-bold text-slate-500 tracking-wider text-left">Cambiar cuenta para pruebas:</p>
-                
-                {/* Admin account */}
-                <button
-                  onClick={() => {
-                    const u = { email: 'hugocesarlemuscortes@gmail.com', name: 'Hugo César Lemus Cortés', avatar: 'H' };
-                    setCurrentUser(u);
-                    localStorage.setItem('google_user', JSON.stringify(u));
-                    setIsProfileOpen(false);
-                  }}
-                  className={`w-full flex items-center justify-between p-2 rounded-xl text-left transition text-xs cursor-pointer ${
-                    isAdmin 
-                      ? 'bg-blue-600/10 border border-blue-500/30 text-white font-semibold' 
-                      : 'hover:bg-slate-900 border border-transparent text-slate-300'
-                  }`}
-                >
-                  <div className="flex items-center space-x-2">
-                    <span className="w-5 h-5 rounded-full bg-rose-600 text-white font-bold text-[10px] flex items-center justify-center">H</span>
-                    <div className="min-w-0">
-                      <p className="leading-tight truncate">hugocesarlemuscortes@gmail.com</p>
-                      <p className="text-[9px] text-slate-400 font-mono">Administrador</p>
-                    </div>
-                  </div>
-                </button>
-
-                {/* Normal account */}
-                <button
-                  onClick={() => {
-                    const u = { email: 'bunkerhrv@gmail.com', name: 'Bunker HRV', avatar: 'B' };
-                    setCurrentUser(u);
-                    localStorage.setItem('google_user', JSON.stringify(u));
-                    setIsProfileOpen(false);
-                  }}
-                  className={`w-full flex items-center justify-between p-2 rounded-xl text-left transition text-xs cursor-pointer ${
-                    currentUser.email === 'bunkerhrv@gmail.com' 
-                      ? 'bg-blue-600/10 border border-blue-500/30 text-white font-semibold' 
-                      : 'hover:bg-slate-900 border border-transparent text-slate-300'
-                  }`}
-                >
-                  <div className="flex items-center space-x-2">
-                    <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-bold text-[10px] flex items-center justify-center">B</span>
-                    <div className="min-w-0">
-                      <p className="leading-tight truncate">bunkerhrv@gmail.com</p>
-                      <p className="text-[9px] text-slate-400 font-mono">Usuario Normal</p>
-                    </div>
-                  </div>
-                </button>
-              </div>
-
-              {/* Manual Custom Email Form */}
-              <div className="py-3 border-b border-slate-800 space-y-2">
-                <p className="text-[9px] uppercase font-bold text-slate-500 tracking-wider text-left">Probar con otro correo de Google:</p>
-                <div className="flex items-center space-x-1.5">
-                  <input
-                    type="email"
-                    placeholder="ejemplo@gmail.com"
-                    value={customEmailInput}
-                    onChange={(e) => setCustomEmailInput(e.target.value)}
-                    className="flex-1 bg-slate-950 text-xs px-2.5 py-1.5 rounded-lg border border-slate-800 text-slate-200 outline-none focus:border-slate-600"
-                  />
+              {/* Account Quick Switch - Only shown to Admins */}
+              {isAdmin && (
+                <div className="py-3 space-y-2 border-b border-slate-800">
+                  <p className="text-[9px] uppercase font-bold text-slate-500 tracking-wider text-left">Cambiar cuenta para pruebas:</p>
+                  
+                  {/* Admin account */}
                   <button
                     onClick={() => {
-                      if (customEmailInput.trim().includes('@')) {
-                        const email = customEmailInput.trim().toLowerCase();
-                        const isHugo = email === 'hugocesarlemuscortes@gmail.com';
-                        const u = { 
-                          email, 
-                          name: isHugo ? 'Hugo César Lemus Cortés' : email.split('@')[0], 
-                          avatar: email[0].toUpperCase() 
-                        };
-                        setCurrentUser(u);
-                        localStorage.setItem('google_user', JSON.stringify(u));
-                        setIsProfileOpen(false);
-                        setCustomEmailInput('');
-                      }
+                      const u = { email: 'hugocesarlemuscortes@gmail.com', name: 'Hugo César Lemus Cortés', avatar: 'H' };
+                      setCurrentUser(u);
+                      localStorage.setItem('google_user', JSON.stringify(u));
+                      setIsProfileOpen(false);
                     }}
-                    className="bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg transition cursor-pointer"
+                    className={`w-full flex items-center justify-between p-2 rounded-xl text-left transition text-xs cursor-pointer ${
+                      isAdmin 
+                        ? 'bg-blue-600/10 border border-blue-500/30 text-white font-semibold' 
+                        : 'hover:bg-slate-900 border border-transparent text-slate-300'
+                    }`}
                   >
-                    Usar
+                    <div className="flex items-center space-x-2">
+                      <span className="w-5 h-5 rounded-full bg-rose-600 text-white font-bold text-[10px] flex items-center justify-center">H</span>
+                      <div className="min-w-0">
+                        <p className="leading-tight truncate">hugocesarlemuscortes@gmail.com</p>
+                        <p className="text-[9px] text-slate-400 font-mono">Administrador</p>
+                      </div>
+                    </div>
+                  </button>
+
+                  {/* Normal account */}
+                  <button
+                    onClick={() => {
+                      const u = { email: 'bunkerhrv@gmail.com', name: 'Bunker HRV', avatar: 'B' };
+                      setCurrentUser(u);
+                      localStorage.setItem('google_user', JSON.stringify(u));
+                      setIsProfileOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between p-2 rounded-xl text-left transition text-xs cursor-pointer ${
+                      currentUser.email === 'bunkerhrv@gmail.com' 
+                        ? 'bg-blue-600/10 border border-blue-500/30 text-white font-semibold' 
+                        : 'hover:bg-slate-900 border border-transparent text-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-2">
+                      <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-bold text-[10px] flex items-center justify-center">B</span>
+                      <div className="min-w-0">
+                        <p className="leading-tight truncate">bunkerhrv@gmail.com</p>
+                        <p className="text-[9px] text-slate-400 font-mono">Usuario Normal</p>
+                      </div>
+                    </div>
                   </button>
                 </div>
-              </div>
+              )}
+
+              {/* Manual Custom Email Form - Only shown to Admins */}
+              {isAdmin && (
+                <div className="py-3 border-b border-slate-800 space-y-2">
+                  <p className="text-[9px] uppercase font-bold text-slate-500 tracking-wider text-left">Probar con otro correo de Google:</p>
+                  <div className="flex items-center space-x-1.5">
+                    <input
+                      type="email"
+                      placeholder="ejemplo@gmail.com"
+                      value={customEmailInput}
+                      onChange={(e) => setCustomEmailInput(e.target.value)}
+                      className="flex-1 bg-slate-950 text-xs px-2.5 py-1.5 rounded-lg border border-slate-800 text-slate-200 outline-none focus:border-slate-600"
+                    />
+                    <button
+                      onClick={() => {
+                        if (customEmailInput.trim().includes('@')) {
+                          const email = customEmailInput.trim().toLowerCase();
+                          const isHugo = email === 'hugocesarlemuscortes@gmail.com';
+                          const u = { 
+                            email, 
+                            name: isHugo ? 'Hugo César Lemus Cortés' : email.split('@')[0], 
+                            avatar: email[0].toUpperCase() 
+                          };
+                          setCurrentUser(u);
+                          localStorage.setItem('google_user', JSON.stringify(u));
+                          setIsProfileOpen(false);
+                          setCustomEmailInput('');
+                        }
+                      }}
+                      className="bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg transition cursor-pointer"
+                    >
+                      Usar
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <button
                 onClick={() => {
