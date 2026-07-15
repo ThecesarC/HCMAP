@@ -407,7 +407,8 @@ export default function App() {
 
       // 3. Try LocalStorage or SAMPLES fallback
       const savedKml = localStorage.getItem('persisted_kml_content');
-      if (savedKml && !savedKml.includes('Secciones de Prueba México') && !savedKml.includes('Sección de Prueba 1234')) {
+      const isOldSample = savedKml && savedKml.includes('Secciones Electorales') && !savedKml.includes('ORGANIC_INTERLOCKING_GRID_V2');
+      if (savedKml && !isOldSample && !savedKml.includes('Secciones de Prueba México') && !savedKml.includes('Sección de Prueba 1234')) {
         loadSampleKml(savedKml, false);
         // Auto-sync to Firestore so it is stored in the database for all other devices
         try {

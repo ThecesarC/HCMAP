@@ -20,38 +20,111 @@ const ALLOWED_SECCIONES = [
 
 const generate30SectionsKml = (): string => {
   let placemarks = '';
-  ALLOWED_SECCIONES.forEach((sec, k) => {
-    // 6 rows x 5 columns grid layout centered at Morelia, Michoacán
-    const row = Math.floor(k / 5);
-    const col = k % 5;
-    const centerLat = 19.7025 + (row - 2.5) * 0.015;
-    const centerLng = -101.1923 + (col - 2) * 0.018;
-    
-    // Deterministic organic polygon generation (6-sided irregular shapes)
-    const numPoints = 6;
-    const points: string[] = [];
-    const baseRadiusLat = 0.0075;
-    const baseRadiusLng = 0.009;
-    
-    const seed = parseInt(sec) || k;
+
+  // Helper to get perturbed node coordinates
+  const getGridNode = (r: number, c: number): { lat: number; lng: number } => {
+    // Center at Morelia (approx. row=2.5, col=2)
+    const baseLat = 19.7025 + (r - 2.5) * 0.015;
+    const baseLng = -101.1923 + (c - 2) * 0.018;
+
+    const seed = r * 100 + c;
     const rand = (i: number) => {
-      const x = Math.sin(seed + i * 3) * 10000;
+      const x = Math.sin(seed + i * 7.1) * 12345.67;
       return x - Math.floor(x);
     };
 
-    for (let i = 0; i < numPoints; i++) {
-      const angle = (i / numPoints) * 2 * Math.PI;
-      // Add organic jitter to make the boundaries look like real administrative borders
-      const angleJitter = (rand(i * 2) - 0.5) * 0.18;
-      const radiusJitter = 0.72 + rand(i * 2 + 1) * 0.55; // Multiplier from 0.72 to 1.27
-      
-      const ptLat = centerLat + Math.sin(angle + angleJitter) * baseRadiusLat * radiusJitter;
-      const ptLng = centerLng + Math.cos(angle + angleJitter) * baseRadiusLng * radiusJitter;
-      points.push(`${ptLng},${ptLat}`);
+    // Up to 35% jitter to make boundaries highly organic but prevent self-intersections
+    const jitterLat = (rand(1) - 0.5) * 0.015 * 0.35;
+    const jitterLng = (rand(2) - 0.5) * 0.018 * 0.35;
+
+    return {
+      lat: baseLat + jitterLat,
+      lng: baseLng + jitterLng,
+    };
+  };
+
+  // Helper to get organic edge points
+  const getEdgePoints = (
+    r1: number, c1: number,
+    r2: number, c2: number
+  ): { lat: number; lng: number }[] => {
+    const pA = getGridNode(r1, c1);
+    const pB = getGridNode(r2, c2);
+
+    const id1 = r1 * 100 + c1;
+    const id2 = r2 * 100 + c2;
+    const minId = Math.min(id1, id2);
+    const maxId = Math.max(id1, id2);
+    const seed = minId * 10000 + maxId;
+
+    const rand = (i: number) => {
+      const x = Math.sin(seed + i * 9.3) * 54321.12;
+      return x - Math.floor(x);
+    };
+
+    const dLat = pB.lat - pA.lat;
+    const dLng = pB.lng - pA.lng;
+
+    // Perpendicular vector for organic displacement
+    const perpLat = -dLng * 0.16;
+    const perpLng = dLat * 0.16;
+
+    const jitter1 = (rand(1) - 0.5) * 1.25;
+    const jitter2 = (rand(2) - 0.5) * 1.25;
+
+    const pt1 = {
+      lat: pA.lat + dLat * 0.33 + perpLat * jitter1,
+      lng: pA.lng + dLng * 0.33 + perpLng * jitter1,
+    };
+
+    const pt2 = {
+      lat: pA.lat + dLat * 0.67 + perpLat * jitter2,
+      lng: pA.lng + dLng * 0.67 + perpLng * jitter2,
+    };
+
+    if (id1 < id2) {
+      return [pt1, pt2];
+    } else {
+      return [pt2, pt1];
     }
-    // Close the polygon by adding the first point again
+  };
+
+  ALLOWED_SECCIONES.forEach((sec, k) => {
+    // 6 rows x 5 columns grid layout
+    const row = Math.floor(k / 5);
+    const col = k % 5;
+    
+    // Construct the polygon coordinates by traversing the four edges clockwise
+    const points: { lat: number; lng: number }[] = [];
+    
+    // Start at Bottom-Left Node
+    points.push(getGridNode(row, col));
+    
+    // Bottom Edge: Bottom-Left to Bottom-Right
+    points.push(...getEdgePoints(row, col, row, col + 1));
+    
+    // Bottom-Right Node
+    points.push(getGridNode(row, col + 1));
+    
+    // Right Edge: Bottom-Right to Top-Right
+    points.push(...getEdgePoints(row, col + 1, row + 1, col + 1));
+    
+    // Top-Right Node
+    points.push(getGridNode(row + 1, col + 1));
+    
+    // Top Edge: Top-Right to Top-Left
+    points.push(...getEdgePoints(row + 1, col + 1, row + 1, col));
+    
+    // Top-Left Node
+    points.push(getGridNode(row + 1, col));
+    
+    // Left Edge: Top-Left to Bottom-Left
+    points.push(...getEdgePoints(row + 1, col, row, col));
+    
+    // Close the polygon (adding the starting point)
     points.push(points[0]);
-    const coordinatesStr = points.join(' ');
+    
+    const coordinatesStr = points.map(p => `${p.lng},${p.lat}`).join(' ');
     
     placemarks += `    <Placemark id="placemark-${sec}">
       <name>Sección ${sec}</name>
@@ -75,6 +148,7 @@ const generate30SectionsKml = (): string => {
   });
 
   return `<?xml version="1.0" encoding="UTF-8"?>
+<!-- ORGANIC_INTERLOCKING_GRID_V2 -->
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
     <name>Secciones Electorales</name>
