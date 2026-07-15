@@ -181,23 +181,85 @@ function MapController({
   selectedFeature, 
   fitBoundsTrigger,
   allFeatures,
-  fitAllTrigger
+  fitAllTrigger,
+  isDetailsCollapsed
 }: { 
   selectedFeature: KmlFeature | null; 
   fitBoundsTrigger: number;
   allFeatures: KmlFeature[];
   fitAllTrigger: number;
+  isDetailsCollapsed: boolean;
 }) {
   const map = useMap();
+  const prevSelectedIdRef = useRef<string | null>(null);
+  const prevTriggerRef = useRef<number>(0);
 
   // Fit bounds to a single selected feature
   useEffect(() => {
     if (!map || !selectedFeature) return;
     const bounds = getFeatureBounds(selectedFeature);
     if (bounds) {
-      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16, animate: true });
+      const prevSelectedId = prevSelectedIdRef.current;
+      const prevTrigger = prevTriggerRef.current;
+
+      prevSelectedIdRef.current = selectedFeature.id;
+      prevTriggerRef.current = fitBoundsTrigger;
+
+      const isNewSelection = selectedFeature.id !== prevSelectedId;
+      const isExplicitTrigger = fitBoundsTrigger !== prevTrigger;
+
+      // Calculate standard zoom level where the entire feature fits nicely
+      const boundsZoom = map.getBoundsZoom(bounds, false, L.point(50, 50));
+      const fitZoom = Math.min(boundsZoom, 16);
+
+      // Determine target zoom:
+      // If it's a new selection or an explicit fitBounds click, use the fit zoom.
+      // Otherwise, preserve the user's current zoom level (clamped to at least fitZoom).
+      let targetZoom = map.getZoom();
+      if (isNewSelection || isExplicitTrigger) {
+        targetZoom = fitZoom;
+      } else {
+        targetZoom = Math.max(map.getZoom(), fitZoom);
+      }
+
+      // Calculate feature's center LatLng
+      const featureCenter = bounds.getCenter();
+
+      // Project feature center to absolute map pixels at the target zoom
+      const featurePixel = map.project(featureCenter, targetZoom);
+
+      const mapSize = map.getSize();
+      const mapWidth = mapSize.x;
+      const mapHeight = mapSize.y;
+
+      let targetPixelX = mapWidth / 2;
+      let targetPixelY = mapHeight / 2;
+
+      const isMobile = window.innerWidth < 768;
+      if (isMobile) {
+        // Mobile details panel at the bottom: height ~320px when expanded, ~64px when collapsed
+        const panelHeight = isDetailsCollapsed ? 64 : 320;
+        // Shift map center down (pushing the feature upwards on screen)
+        targetPixelY = mapHeight / 2 + panelHeight / 2;
+      } else {
+        // Desktop details panel on the bottom-right: width ~410px when expanded, ~100px when collapsed
+        const panelWidth = isDetailsCollapsed ? 100 : 410;
+        // Shift map center right (pushing the feature leftwards on screen)
+        targetPixelX = mapWidth / 2 + panelWidth / 2;
+      }
+
+      // Convert target screen center offset to absolute map pixels at target zoom
+      const targetCenterPixel = L.point(
+        featurePixel.x - (targetPixelX - mapWidth / 2),
+        featurePixel.y - (targetPixelY - mapHeight / 2)
+      );
+
+      // Unproject back to LatLng to get the adjusted map center
+      const adjustedCenter = map.unproject(targetCenterPixel, targetZoom);
+
+      map.setView(adjustedCenter, targetZoom, { animate: true });
     }
-  }, [map, selectedFeature, fitBoundsTrigger]);
+  }, [map, selectedFeature, fitBoundsTrigger, isDetailsCollapsed]);
 
   // Fit bounds to all features
   useEffect(() => {
@@ -1660,7 +1722,7 @@ export default function App() {
                                   setSelectedFeature(f);
                                   setFitBoundsTrigger(prev => prev + 1);
                                   setIsColorWidgetCollapsed(true); // Automatically collapse widget on click to keep screen clean!
-                                  setIsDetailsCollapsed(true); // Automatically collapse details too so it doesn't block!
+                                  setIsDetailsCollapsed(false); // Let it expand because asymmetrical padding will prevent covering!
                                 }}
                                 className={`w-full flex items-center justify-between p-1 sm:p-1.5 text-left transition rounded-md text-[10px] sm:text-xs ${
                                   isSelected 
@@ -1769,6 +1831,7 @@ export default function App() {
                 fitBoundsTrigger={fitBoundsTrigger}
                 allFeatures={filteredFeatures}
                 fitAllTrigger={fitAllTrigger}
+                isDetailsCollapsed={isDetailsCollapsed}
               />
 
               {/* Render vector features */}
@@ -1797,7 +1860,6 @@ export default function App() {
                         eventHandlers={{
                           click: () => {
                             setSelectedFeature(f);
-                            setFitBoundsTrigger(prev => prev + 1);
                             setIsDetailsCollapsed(false);
                           }
                         }}
@@ -1831,7 +1893,6 @@ export default function App() {
                         eventHandlers={{
                           click: () => {
                             setSelectedFeature(f);
-                            setFitBoundsTrigger(prev => prev + 1);
                             setIsDetailsCollapsed(false);
                           }
                         }}
@@ -1856,7 +1917,6 @@ export default function App() {
                       eventHandlers={{
                         click: () => {
                           setSelectedFeature(f);
-                          setFitBoundsTrigger(prev => prev + 1);
                           setIsDetailsCollapsed(false);
                         }
                       }}
