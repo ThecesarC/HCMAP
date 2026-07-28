@@ -439,7 +439,37 @@ const PALETTE_BRIGADAS = [
 ];
 
 function getFeatureBrigadeInfo(feature: any): { key: string; name: string; color: string; border: string } {
-  // 1. Check section numbers first (if Distrito 8 sections apply)
+  // 1. Check explicitly assigned brigadeName from file upload / district management (e.g. 'Brigada 1', 'Brigada 2')
+  const brigadeNameStr = (feature.brigadeName || '').trim();
+  const lowerB = brigadeNameStr.toLowerCase();
+  const isGeneric = !brigadeNameStr || lowerB === 'general' || lowerB.includes('brigadas 1-5') || lowerB.includes('general (b1-b4)');
+
+  if (!isGeneric) {
+    const bNumMatch = brigadeNameStr.match(/\d+/);
+    if (bNumMatch) {
+      const num = parseInt(bNumMatch[0], 10);
+      const idx = (num - 1) % PALETTE_BRIGADAS.length;
+      const palette = PALETTE_BRIGADAS[Math.max(0, idx)];
+      return { key: `brigada-${num}`, name: `Brigada ${num}`, color: palette.fill, border: palette.border };
+    } else {
+      let hash = 0;
+      for (let i = 0; i < brigadeNameStr.length; i++) hash += brigadeNameStr.charCodeAt(i);
+      const palette = PALETTE_BRIGADAS[Math.abs(hash) % PALETTE_BRIGADAS.length];
+      return { key: `brigade-${brigadeNameStr}`, name: brigadeNameStr, color: palette.fill, border: palette.border };
+    }
+  }
+
+  // 2. Check properties / text in name / description for explicit BRIGADA tags (e.g., BRIGADA 1, B1, BRIGADA_2)
+  const fullSearchText = `${feature.name || ''} ${feature.description || ''} ${JSON.stringify(feature.properties || {})}`.toUpperCase();
+  const bMatch = fullSearchText.match(/BRIGADA\s*(\d+)/i) || fullSearchText.match(/\bB(\d+)\b/i) || fullSearchText.match(/BRIGADA_(\d+)/i);
+  if (bMatch) {
+    const num = parseInt(bMatch[1], 10);
+    const idx = (num - 1) % PALETTE_BRIGADAS.length;
+    const palette = PALETTE_BRIGADAS[Math.max(0, idx)];
+    return { key: `brigada-${num}`, name: `Brigada ${num}`, color: palette.fill, border: palette.border };
+  }
+
+  // 3. Check hardcoded section mappings for Distrito 8 (when brigadeName is generic 'Brigadas 1-5')
   const secVal = getSeccionValue(feature);
   if (secVal) {
     if (['1145', '1148', '1149', '1151', '1152', '1153', '1161', '2810', '2811', '2814', '2815', '2776', '1047'].includes(secVal)) {
@@ -459,43 +489,16 @@ function getFeatureBrigadeInfo(feature: any): { key: string; name: string; color
     }
   }
 
-  // 2. Check explicitly assigned brigadeName from file upload (e.g. 'Brigada 1', 'Brigada 2')
-  const brigadeNameStr = (feature.brigadeName || '').trim();
-  if (brigadeNameStr && brigadeNameStr.toLowerCase() !== 'general') {
-    const bNumMatch = brigadeNameStr.match(/\d+/);
-    if (bNumMatch) {
-      const idx = (parseInt(bNumMatch[0], 10) - 1) % PALETTE_BRIGADAS.length;
-      const palette = PALETTE_BRIGADAS[Math.max(0, idx)];
-      return { key: `brigade-${brigadeNameStr}`, name: brigadeNameStr, color: palette.fill, border: palette.border };
-    } else {
-      let hash = 0;
-      for (let i = 0; i < brigadeNameStr.length; i++) hash += brigadeNameStr.charCodeAt(i);
-      const palette = PALETTE_BRIGADAS[Math.abs(hash) % PALETTE_BRIGADAS.length];
-      return { key: `brigade-${brigadeNameStr}`, name: brigadeNameStr, color: palette.fill, border: palette.border };
-    }
-  }
-
-  // 3. Check feature properties or text in name/fileName for BRIGADA
-  const fullSearchText = `${feature.name || ''} ${feature.fileName || ''} ${JSON.stringify(feature.properties || {})}`.toUpperCase();
-  const bMatch = fullSearchText.match(/BRIGADA\s*(\d+)/i) || fullSearchText.match(/B(\d+)/i) || fullSearchText.match(/BRIGADA_(\d+)/i);
-  if (bMatch) {
-    const num = parseInt(bMatch[1], 10);
-    const idx = (num - 1) % PALETTE_BRIGADAS.length;
-    const palette = PALETTE_BRIGADAS[Math.max(0, idx)];
-    return { key: `brigade-num-${num}`, name: `Brigada ${num}`, color: palette.fill, border: palette.border };
-  }
-
-  // 4. Fallback by KML file ID or file name so each uploaded file in a district gets a separate brigade and color
-  if (feature.fileId || feature.fileName) {
-    const name = feature.fileName ? feature.fileName.replace(/\.kml$/i, '') : 'Brigada';
+  // 4. Fallback: Group by KML file name if available, or default to Brigada 1
+  if (feature.fileName) {
+    const cleanFileName = feature.fileName.replace(/\.kml$/i, '');
     let hash = 0;
-    const str = feature.fileId || name;
-    for (let i = 0; i < str.length; i++) hash += str.charCodeAt(i);
+    for (let i = 0; i < cleanFileName.length; i++) hash += cleanFileName.charCodeAt(i);
     const palette = PALETTE_BRIGADAS[Math.abs(hash) % PALETTE_BRIGADAS.length];
-    return { key: `file-${str}`, name: name, color: palette.fill, border: palette.border };
+    return { key: `file-${cleanFileName}`, name: cleanFileName, color: palette.fill, border: palette.border };
   }
 
-  return { key: 'brigada-default', name: 'Brigada General', color: '#ef4444', border: '#b91c1c' };
+  return { key: 'brigada-1', name: 'Brigada 1', color: PALETTE_BRIGADAS[0].fill, border: PALETTE_BRIGADAS[0].border };
 }
 
 export default function App() {
@@ -720,7 +723,7 @@ export default function App() {
               const defaultFile: DistrictKmlFile = {
                 id: 'd8-initial-kml',
                 name: 'Secciones_Distrito_8.kml',
-                brigade: 'General (B1-B4)',
+                brigade: 'Brigadas 1-5',
                 enabled: true,
                 kmlText: kmlTextToLoad!,
                 kmlDoc: parsed,
@@ -1238,44 +1241,48 @@ export default function App() {
       {/* Elegant Header */}
       <header className="h-[60px] bg-[#0f172a] border-b border-[#1e293b] flex items-center px-4 sm:px-6 justify-between flex-shrink-0 z-20">
         <div className="flex items-center space-x-3">
-          <button
-            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl border text-xs font-bold transition select-none cursor-pointer ${
-              isSidebarOpen 
-                ? 'bg-blue-600/20 text-blue-400 border-blue-500/40' 
-                : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
-            }`}
-            title="Activar / Desactivar Barra Lateral de Distritos y Brigadas"
-          >
-            <Layers className="w-4 h-4 text-blue-400" />
-            <span className="hidden sm:inline">Distritos & Brigadas</span>
-            <span className="bg-blue-500/20 text-blue-300 text-[10px] font-mono px-1.5 py-0.2 rounded">
-              {districts.filter(d => d.enabled).length}/{districts.length}
-            </span>
-          </button>
+          {isAdmin && (
+            <button
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl border text-xs font-bold transition select-none cursor-pointer ${
+                isSidebarOpen 
+                  ? 'bg-blue-600/20 text-blue-400 border-blue-500/40' 
+                  : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
+              }`}
+              title="Activar / Desactivar Barra Lateral de Distritos y Brigadas"
+            >
+              <Layers className="w-4 h-4 text-blue-400" />
+              <span className="hidden sm:inline">Distritos & Brigadas</span>
+              <span className="bg-blue-500/20 text-blue-300 text-[10px] font-mono px-1.5 py-0.2 rounded">
+                {districts.filter(d => d.enabled).length}/{districts.length}
+              </span>
+            </button>
+          )}
 
           <div className="flex items-center">
             <span className="font-extrabold tracking-tight text-red-500 text-lg">HC.MAP</span>
             <span className="ml-2 text-[#475569] text-xs font-semibold px-2 py-0.5 bg-slate-950/45 rounded border border-slate-800/40 hidden md:inline">Visor de Capas</span>
           </div>
 
-          {/* Quick District Pills in Header */}
-          <div className="hidden lg:flex items-center space-x-1.5 pl-2">
-            {districts.map(d => (
-              <button
-                key={d.id}
-                onClick={() => toggleDistrict(d.id)}
-                className={`text-[10px] font-bold px-2.5 py-1 rounded-full border transition flex items-center space-x-1.5 ${
-                  d.enabled 
-                    ? 'bg-slate-900 text-slate-200 border-slate-700' 
-                    : 'bg-slate-950/60 text-slate-600 border-slate-900 line-through'
-                }`}
-              >
-                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: d.color }}></span>
-                <span>{d.name}</span>
-              </button>
-            ))}
-          </div>
+          {/* Quick District Pills in Header - Admin only */}
+          {isAdmin && (
+            <div className="hidden lg:flex items-center space-x-1.5 pl-2">
+              {districts.map(d => (
+                <button
+                  key={d.id}
+                  onClick={() => toggleDistrict(d.id)}
+                  className={`text-[10px] font-bold px-2.5 py-1 rounded-full border transition flex items-center space-x-1.5 ${
+                    d.enabled 
+                      ? 'bg-slate-900 text-slate-200 border-slate-700' 
+                      : 'bg-slate-950/60 text-slate-600 border-slate-900 line-through'
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: d.color }}></span>
+                  <span>{d.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         
         {/* Google Authentication Account Profile Selector */}
@@ -1407,8 +1414,8 @@ export default function App() {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
         
-        {/* LEFT SIDEBAR: Distritos & Brigadas Management */}
-        {isSidebarOpen && (
+        {/* LEFT SIDEBAR: Distritos & Brigadas Management (Admin Only) */}
+        {isAdmin && isSidebarOpen && (
           <aside className="w-full md:w-[360px] lg:w-[380px] flex-shrink-0 border-b md:border-b-0 md:border-r border-[#1e293b] flex flex-col bg-[#0f172a] max-h-[50vh] md:max-h-full z-10 transition-all duration-300 shadow-xl">
             
             {/* Sidebar Title & Quick Actions */}
