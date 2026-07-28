@@ -109,6 +109,6 @@ export async function getKmlFromFirestore(): Promise<string | null> {
     return null;
   } catch (error) {
     console.error("Error reading KML from Firestore:", error);
-    return null;
+    throw error;
   }
 }

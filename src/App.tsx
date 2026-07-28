@@ -34,10 +34,18 @@ import {
   Shield,
   ArrowLeft,
   MapPin,
-  ChevronRight
+  ChevronRight,
+  Layers,
+  Plus,
+  Folder,
+  Tag,
+  EyeOff,
+  X,
+  Check,
+  Filter
 } from 'lucide-react';
 import { parseKml } from './utils/kmlParser';
-import { KmlDocument, KmlFeature } from './types';
+import { KmlDocument, KmlFeature, District, DistrictKmlFile, DistrictFeature } from './types';
 import { SAMPLES } from './data/samples';
 import { getKmlFromFirestore, saveKmlToFirestore } from './lib/firebase';
 
@@ -416,6 +424,80 @@ const carriesArea = (feature: KmlFeature): boolean => {
   return false;
 };
 
+// Palette of distinct colors for Brigadas
+const PALETTE_BRIGADAS = [
+  { fill: '#16a34a', border: '#15803d', defaultName: 'Brigada 1' }, // Emerald / Green
+  { fill: '#8b4513', border: '#5c2e0b', defaultName: 'Brigada 2' }, // SaddleBrown / Brown
+  { fill: '#dc2626', border: '#991b1b', defaultName: 'Brigada 3' }, // Red
+  { fill: '#2563eb', border: '#1d4ed8', defaultName: 'Brigada 4' }, // Blue
+  { fill: '#9333ea', border: '#6b21a8', defaultName: 'Brigada 5' }, // Purple
+  { fill: '#0284c7', border: '#0369a1', defaultName: 'Brigada 6' }, // Sky
+  { fill: '#ea580c', border: '#c2410c', defaultName: 'Brigada 7' }, // Orange
+  { fill: '#db2777', border: '#be185d', defaultName: 'Brigada 8' }, // Pink
+  { fill: '#0d9488', border: '#0f766e', defaultName: 'Brigada 9' }, // Teal
+  { fill: '#7c3aed', border: '#6d28d9', defaultName: 'Brigada 10' }  // Violet
+];
+
+function getFeatureBrigadeInfo(feature: any): { key: string; name: string; color: string; border: string } {
+  // 1. Check section numbers first (if Distrito 8 sections apply)
+  const secVal = getSeccionValue(feature);
+  if (secVal) {
+    if (['1145', '1148', '1149', '1151', '1152', '1153', '1161', '2810', '2811', '2814', '2815', '2776', '1047'].includes(secVal)) {
+      return { key: 'brigada-1', name: 'Brigada 1', color: PALETTE_BRIGADAS[0].fill, border: PALETTE_BRIGADAS[0].border };
+    }
+    if (['2802', '2804', '2805', '1008'].includes(secVal)) {
+      return { key: 'brigada-2', name: 'Brigada 2', color: PALETTE_BRIGADAS[1].fill, border: PALETTE_BRIGADAS[1].border };
+    }
+    if (['2729', '1211', '1019', '2721', '2809'].includes(secVal)) {
+      return { key: 'brigada-3', name: 'Brigada 3', color: PALETTE_BRIGADAS[2].fill, border: PALETTE_BRIGADAS[2].border };
+    }
+    if (['1022', '1210', '2748'].includes(secVal)) {
+      return { key: 'brigada-4', name: 'Brigada 4', color: PALETTE_BRIGADAS[3].fill, border: PALETTE_BRIGADAS[3].border };
+    }
+    if (['1052', '1060', '1061', '1141', '1142'].includes(secVal)) {
+      return { key: 'brigada-5', name: 'Brigada 5', color: PALETTE_BRIGADAS[4].fill, border: PALETTE_BRIGADAS[4].border };
+    }
+  }
+
+  // 2. Check explicitly assigned brigadeName from file upload (e.g. 'Brigada 1', 'Brigada 2')
+  const brigadeNameStr = (feature.brigadeName || '').trim();
+  if (brigadeNameStr && brigadeNameStr.toLowerCase() !== 'general') {
+    const bNumMatch = brigadeNameStr.match(/\d+/);
+    if (bNumMatch) {
+      const idx = (parseInt(bNumMatch[0], 10) - 1) % PALETTE_BRIGADAS.length;
+      const palette = PALETTE_BRIGADAS[Math.max(0, idx)];
+      return { key: `brigade-${brigadeNameStr}`, name: brigadeNameStr, color: palette.fill, border: palette.border };
+    } else {
+      let hash = 0;
+      for (let i = 0; i < brigadeNameStr.length; i++) hash += brigadeNameStr.charCodeAt(i);
+      const palette = PALETTE_BRIGADAS[Math.abs(hash) % PALETTE_BRIGADAS.length];
+      return { key: `brigade-${brigadeNameStr}`, name: brigadeNameStr, color: palette.fill, border: palette.border };
+    }
+  }
+
+  // 3. Check feature properties or text in name/fileName for BRIGADA
+  const fullSearchText = `${feature.name || ''} ${feature.fileName || ''} ${JSON.stringify(feature.properties || {})}`.toUpperCase();
+  const bMatch = fullSearchText.match(/BRIGADA\s*(\d+)/i) || fullSearchText.match(/B(\d+)/i) || fullSearchText.match(/BRIGADA_(\d+)/i);
+  if (bMatch) {
+    const num = parseInt(bMatch[1], 10);
+    const idx = (num - 1) % PALETTE_BRIGADAS.length;
+    const palette = PALETTE_BRIGADAS[Math.max(0, idx)];
+    return { key: `brigade-num-${num}`, name: `Brigada ${num}`, color: palette.fill, border: palette.border };
+  }
+
+  // 4. Fallback by KML file ID or file name so each uploaded file in a district gets a separate brigade and color
+  if (feature.fileId || feature.fileName) {
+    const name = feature.fileName ? feature.fileName.replace(/\.kml$/i, '') : 'Brigada';
+    let hash = 0;
+    const str = feature.fileId || name;
+    for (let i = 0; i < str.length; i++) hash += str.charCodeAt(i);
+    const palette = PALETTE_BRIGADAS[Math.abs(hash) % PALETTE_BRIGADAS.length];
+    return { key: `file-${str}`, name: name, color: palette.fill, border: palette.border };
+  }
+
+  return { key: 'brigada-default', name: 'Brigada General', color: '#ef4444', border: '#b91c1c' };
+}
+
 export default function App() {
   const [kmlDoc, setKmlDoc] = useState<KmlDocument | null>(null);
   const [selectedFeature, setSelectedFeature] = useState<KmlFeature | null>(null);
@@ -423,7 +505,57 @@ export default function App() {
   const [dragActive, setDragActive] = useState(false);
   const [fitBoundsTrigger, setFitBoundsTrigger] = useState(0);
   const [fitAllTrigger, setFitAllTrigger] = useState(0);
-  
+
+  // Districts & Brigades State Management
+  const [districts, setDistricts] = useState<District[]>(() => {
+    const saved = localStorage.getItem('districts_data_v2');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      } catch (e) {
+        console.warn("Could not parse saved districts_data_v2:", e);
+      }
+    }
+    return [
+      {
+        id: 'distrito-8',
+        name: 'Distrito 8',
+        description: 'Polígonos y secciones electorales del Distrito 8',
+        enabled: true,
+        color: '#3b82f6', // Blue theme
+        kmlFiles: []
+      },
+      {
+        id: 'distrito-11',
+        name: 'Distrito 11',
+        description: 'Polígonos y capas correspondientes al Distrito 11',
+        enabled: true,
+        color: '#10b981', // Emerald green theme
+        kmlFiles: []
+      }
+    ];
+  });
+
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [selectedDistrictFilter, setSelectedDistrictFilter] = useState<string>('all');
+  const [selectedBrigadeFilter, setSelectedBrigadeFilter] = useState<string>('all');
+
+  // KML Upload Modal with District & Brigade assignment
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [pendingKmlText, setPendingKmlText] = useState<string | null>(null);
+  const [pendingFileName, setPendingFileName] = useState<string>('Poligono.kml');
+  const [targetDistrictId, setTargetDistrictId] = useState<string>('distrito-8');
+  const [targetBrigade, setTargetBrigade] = useState<string>('Brigada 1');
+  const [customBrigadeInput, setCustomBrigadeInput] = useState<string>('');
+
+  // New District Creation Modal
+  const [newDistrictModalOpen, setNewDistrictModalOpen] = useState(false);
+  const [newDistrictNameInput, setNewDistrictNameInput] = useState('');
+  const [newDistrictColorInput, setNewDistrictColorInput] = useState('#8b5cf6');
+
   // Custom coloring options
   const [coloringMode, setColoringMode] = useState<'kml' | 'random' | 'property'>('kml');
   const [colorByProperty, setColorByProperty] = useState<string>('');
@@ -432,11 +564,22 @@ export default function App() {
   // Error handling
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Special section filter active by default
-  const [filterSeccionesActive, setFilterSeccionesActive] = useState(true);
+  // Special section filter active by default (false so all new district KMLs render without restriction)
+  const [filterSeccionesActive, setFilterSeccionesActive] = useState(false);
 
   // Map Base Tile (Streets by default, showing streets and colonies)
   const [mapBase, setMapBase] = useState<'streets' | 'satellite' | 'dark'>('streets');
+
+  // Save districts to localStorage whenever modified
+  useEffect(() => {
+    if (districts && districts.length > 0) {
+      try {
+        localStorage.setItem('districts_data_v2', JSON.stringify(districts));
+      } catch (e) {
+        console.warn("Error saving districts to localStorage:", e);
+      }
+    }
+  }, [districts]);
 
   // Google Account simulated states
   const [currentUser, setCurrentUser] = useState<{ email: string; name: string; avatar?: string } | null>(() => {
@@ -458,66 +601,143 @@ export default function App() {
   const [isSavingToServer, setIsSavingToServer] = useState(false);
   const [serverSaveMessage, setServerSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  const [firestoreQuotaExceeded, setFirestoreQuotaExceeded] = useState(false);
+
+  const checkFirestoreQuotaError = (err: any) => {
+    const errMsg = err?.message || String(err);
+    if (errMsg.includes("quota") || errMsg.includes("Quota") || errMsg.includes("exceeded") || errMsg.includes("Exceeded")) {
+      setFirestoreQuotaExceeded(true);
+    }
+  };
+
   const isFakeKml = (kmlText: string | null): boolean => {
     if (!kmlText) return false;
     return kmlText.includes('HEXAGONAL_GRID');
   };
 
-  // Load default sample or persisted KML on mount
+  // Helper function to attach parsed KML to a district as a KML file
+  const attachKmlToDistrict = (
+    kmlText: string, 
+    fileName: string, 
+    districtId: string, 
+    brigadeName: string
+  ) => {
+    try {
+      const parsed = parseKml(kmlText);
+      setKmlDoc(parsed);
+
+      const newFile: DistrictKmlFile = {
+        id: 'kml-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
+        name: fileName || parsed.name || 'Archivo.kml',
+        brigade: brigadeName || 'General',
+        enabled: true,
+        kmlText: kmlText,
+        kmlDoc: parsed,
+        uploadedAt: new Date().toLocaleDateString('es-MX')
+      };
+
+      setDistricts(prev => prev.map(dist => {
+        if (dist.id === districtId) {
+          // Check if file with same name already exists to avoid duplicate entries
+          const existing = dist.kmlFiles.filter(f => f.name !== newFile.name);
+          return {
+            ...dist,
+            enabled: true, // Auto-activate district on upload
+            kmlFiles: [...existing, newFile]
+          };
+        }
+        return dist;
+      }));
+
+      // Trigger map bounds fit
+      setTimeout(() => {
+        setFitAllTrigger(prev => prev + 1);
+      }, 150);
+
+      return true;
+    } catch (err) {
+      console.error("Error attaching KML to district:", err);
+      setErrorMsg("Error al procesar el archivo KML. Verifica que el archivo XML sea válido.");
+      return false;
+    }
+  };
+
+  // Load default sample or persisted KML on mount into Distrito 8
   useEffect(() => {
     const initKml = async () => {
+      let kmlTextToLoad: string | null = null;
+
       // 1. Try Firestore first
       try {
         console.log("Intentando cargar KML desde Firebase Firestore...");
         const firestoreKml = await getKmlFromFirestore();
         if (firestoreKml && !isFakeKml(firestoreKml)) {
           console.log("¡Cargado KML exitosamente desde Firestore!");
-          loadSampleKml(firestoreKml, false);
-          return;
-        } else if (firestoreKml && isFakeKml(firestoreKml)) {
-          console.log("Detectado KML de cuadrícula falsa en Firestore. Ignorando para permitir carga de KML original...");
+          kmlTextToLoad = firestoreKml;
         }
-      } catch (fErr) {
+      } catch (fErr: any) {
         console.warn("No se pudo conectar a Firestore (o no existe documento aún):", fErr);
+        checkFirestoreQuotaError(fErr);
       }
 
-      // 2. Try Node Express backend API fallback
-      try {
-        console.log("Intentando cargar KML desde el servidor API local...");
-        const res = await fetch('/api/kml');
-        const data = await res.json();
-        if (data.success && data.kml && !isFakeKml(data.kml)) {
-          console.log("Cargando KML permanente desde el servidor local");
-          loadSampleKml(data.kml, false);
-          return;
-        } else if (data.kml && isFakeKml(data.kml)) {
-          console.log("Detectado KML de cuadrícula falsa en el servidor local. Ignorando...");
-        }
-      } catch (err) {
-        console.warn("Error fetching KML from local API server:", err);
-      }
-
-      // 3. Try LocalStorage
-      const savedKml = localStorage.getItem('persisted_kml_content');
-      if (savedKml && !isFakeKml(savedKml)) {
-        console.log("Cargando KML guardado en localStorage...");
-        loadSampleKml(savedKml, false);
-        // Auto-sync to Firestore so it is stored in the database for all other devices
+      // 2. Try Node Express backend API fallback if not found in Firestore
+      if (!kmlTextToLoad) {
         try {
-          console.log("Auto-sincronizando KML de localStorage a Firebase Firestore...");
-          await saveKmlToFirestore(savedKml, currentUser?.email || 'bunkerhrv@gmail.com');
-          console.log("¡KML de localStorage auto-sincronizado exitosamente!");
-        } catch (fErr) {
-          console.warn("Error al auto-sincronizar KML a Firestore:", fErr);
+          console.log("Intentando cargar KML desde el servidor API local...");
+          const res = await fetch('/api/kml');
+          const data = await res.json();
+          if (data.success && data.kml && !isFakeKml(data.kml)) {
+            console.log("Cargando KML permanente desde el servidor local");
+            kmlTextToLoad = data.kml;
+          }
+        } catch (err) {
+          console.warn("Error fetching KML from local API server:", err);
         }
-      } else {
-        if (savedKml && isFakeKml(savedKml)) {
-          console.log("Detectado KML de cuadrícula falsa en localStorage. Limpiando para permitir carga de KML original...");
-          localStorage.removeItem('persisted_kml_content');
-          localStorage.removeItem('persisted_kml_name');
+      }
+
+      // 3. Try LocalStorage fallback
+      if (!kmlTextToLoad) {
+        const savedKml = localStorage.getItem('persisted_kml_content');
+        if (savedKml && !isFakeKml(savedKml)) {
+          console.log("Cargando KML guardado en localStorage...");
+          kmlTextToLoad = savedKml;
         }
-        console.log("No se encontró KML válido en caché o base de datos. Esperando archivo KML original...");
-        setKmlDoc(null);
+      }
+
+      // 4. Default to sample KML if no file stored
+      if (!kmlTextToLoad && SAMPLES && SAMPLES.length > 0) {
+        kmlTextToLoad = SAMPLES[0].content;
+      }
+
+      // Attach to Distrito 8 if Distrito 8 currently has no files
+      if (kmlTextToLoad) {
+        setDistricts(prev => {
+          const d8 = prev.find(d => d.id === 'distrito-8');
+          if (d8 && d8.kmlFiles.length === 0) {
+            try {
+              const parsed = parseKml(kmlTextToLoad!);
+              setKmlDoc(parsed);
+              const defaultFile: DistrictKmlFile = {
+                id: 'd8-initial-kml',
+                name: 'Secciones_Distrito_8.kml',
+                brigade: 'General (B1-B4)',
+                enabled: true,
+                kmlText: kmlTextToLoad!,
+                kmlDoc: parsed,
+                uploadedAt: new Date().toLocaleDateString('es-MX')
+              };
+              return prev.map(d => d.id === 'distrito-8' ? { ...d, kmlFiles: [defaultFile] } : d);
+            } catch (e) {
+              console.error("Error parsing default KML into Distrito 8:", e);
+            }
+          }
+          return prev;
+        });
+
+        // Trigger map bounds
+        setTimeout(() => {
+          setFitAllTrigger(prev => prev + 1);
+        }, 200);
       }
     };
 
@@ -543,6 +763,7 @@ export default function App() {
         firestoreSuccess = true;
       } catch (fErr: any) {
         console.error("Error saving to Firestore:", fErr);
+        checkFirestoreQuotaError(fErr);
       }
 
       // 2. Save to Express server (as fallback/dual-write if server is active)
@@ -613,20 +834,131 @@ export default function App() {
   // Check if current document has any 'SECCION' key
   const hasSeccionProperties = kmlDoc?.features.some(f => getSeccionValue(f) !== null) || false;
 
-  // Active features list based on Seccion filter and "ÁREA" polygon requirement
-  const activeFeatures = kmlDoc?.features.filter(f => {
-    // If it is a polygon, only consider it if it carries the word "ÁREA"
-    if (f.geometryType === 'Polygon') {
-      if (!carriesArea(f)) {
-        return false;
+  // Active features aggregated across all enabled districts and enabled KML files
+  const activeDistrictFeatures = useMemo<DistrictFeature[]>(() => {
+    const result: DistrictFeature[] = [];
+
+    districts.forEach(district => {
+      if (!district.enabled) return;
+
+      district.kmlFiles.forEach(file => {
+        if (!file.enabled) return;
+
+        file.kmlDoc.features.forEach(feat => {
+          // If filterSeccionesActive is explicitly turned ON, restrict section filter to Distrito 8
+          if (filterSeccionesActive && district.id === 'distrito-8' && feat.properties) {
+            const hasSec = Object.keys(feat.properties).some(k => k.toUpperCase().includes('SECCION'));
+            if (hasSec && !isFeatureAllowed(feat)) {
+              return;
+            }
+          }
+
+          result.push({
+            ...feat,
+            districtId: district.id,
+            districtName: district.name,
+            districtColor: district.color,
+            brigadeName: file.brigade || 'General',
+            fileId: file.id,
+            fileName: file.name
+          });
+        });
+      });
+    });
+
+    return result;
+  }, [districts, filterSeccionesActive]);
+
+  const activeFeatures = activeDistrictFeatures;
+
+  // District manipulation methods
+  const toggleDistrict = (districtId: string) => {
+    setDistricts(prev => prev.map(d => d.id === districtId ? { ...d, enabled: !d.enabled } : d));
+  };
+
+  const toggleKmlFile = (districtId: string, fileId: string) => {
+    setDistricts(prev => prev.map(d => {
+      if (d.id === districtId) {
+        return {
+          ...d,
+          kmlFiles: d.kmlFiles.map(f => f.id === fileId ? { ...f, enabled: !f.enabled } : f)
+        };
+      }
+      return d;
+    }));
+  };
+
+  const deleteKmlFile = (districtId: string, fileId: string) => {
+    setDistricts(prev => prev.map(d => {
+      if (d.id === districtId) {
+        return {
+          ...d,
+          kmlFiles: d.kmlFiles.filter(f => f.id !== fileId)
+        };
+      }
+      return d;
+    }));
+  };
+
+  const handleCreateDistrict = () => {
+    if (!newDistrictNameInput.trim()) return;
+    const newId = 'distrito-' + Date.now();
+    const newDist: District = {
+      id: newId,
+      name: newDistrictNameInput.trim(),
+      description: `Polígonos y capas correspondientes a ${newDistrictNameInput.trim()}`,
+      enabled: true,
+      color: newDistrictColorInput || '#8b5cf6',
+      kmlFiles: []
+    };
+    setDistricts(prev => [...prev, newDist]);
+    setTargetDistrictId(newId);
+    setNewDistrictNameInput('');
+    setNewDistrictModalOpen(false);
+  };
+
+  const handleKmlFileSelected = (file: File, preselectDistrictId?: string) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      if (text) {
+        setPendingKmlText(text);
+        setPendingFileName(file.name);
+        if (preselectDistrictId) {
+          setTargetDistrictId(preselectDistrictId);
+        }
+        setUploadModalOpen(true);
+      }
+    };
+    reader.onerror = () => {
+      setErrorMsg('Error al leer el archivo KML.');
+    };
+    reader.readAsText(file);
+  };
+
+  const confirmKmlUpload = async () => {
+    if (!pendingKmlText) return;
+    const finalBrigade = customBrigadeInput.trim() || targetBrigade || 'Brigada 1';
+    
+    const success = attachKmlToDistrict(
+      pendingKmlText,
+      pendingFileName,
+      targetDistrictId,
+      finalBrigade
+    );
+
+    if (success) {
+      setUploadModalOpen(false);
+      setPendingKmlText(null);
+      setCustomBrigadeInput('');
+
+      try {
+        await saveKmlToFirestore(pendingKmlText, currentUser?.email || 'bunkerhrv@gmail.com');
+      } catch (err) {
+        console.warn("Auto-sync to Firestore skipped/limited:", err);
       }
     }
-
-    if (filterSeccionesActive && hasSeccionProperties) {
-      return isFeatureAllowed(f);
-    }
-    return true;
-  }) || [];
+  };
 
   // Extract all unique ExtendedData keys from active features to allow categorization
   const getExtendedDataKeys = (): string[] => {
@@ -657,86 +989,6 @@ export default function App() {
   // Get style configs for Leaflet vectors based on active color modes
   const getFeatureStyle = (feature: KmlFeature) => {
     const isSelected = selectedFeature?.id === feature.id;
-
-    // Specific brown sections requested by the user: 2802, 2804, 2805, 1008
-    const secVal = getSeccionValue(feature);
-    const isBrownSection = secVal && ['2802', '2804', '2805', '1008'].includes(secVal);
-
-    if (isBrownSection) {
-      const brownFill = '#8B4513'; // SaddleBrown
-      const brownBorder = '#5C2E0B'; // Dark Brown
-      return {
-        fillColor: brownFill,
-        fillOpacity: isSelected ? 0.75 : 0.45,
-        color: isSelected ? '#ffffff' : brownBorder,
-        weight: isSelected ? 4 : 2.5
-      };
-    }
-
-    // Specific green sections requested by the user: 1145, 1148, 1149, 1151, 1152, 1153, 1161, 2809, 2810, 2811, 2814, 2815, 2776, 1047
-    const isGreenSection = secVal && [
-      '1145', '1148', '1149', '1151', '1152', '1153', '1161', 
-      '2809', '2810', '2811', '2814', '2815', '2776', '1047'
-    ].includes(secVal);
-
-    if (isGreenSection) {
-      const greenFill = '#16a34a'; // Emerald/Green 600
-      const greenBorder = '#15803d'; // Darker Green
-      return {
-        fillColor: greenFill,
-        fillOpacity: isSelected ? 0.75 : 0.45,
-        color: isSelected ? '#ffffff' : greenBorder,
-        weight: isSelected ? 4 : 2.5
-      };
-    }
-
-    // Specific red sections requested by the user: 2729, 1211, 1019, 2721
-    const isRedSection = secVal && [
-      '2729', '1211', '1019', '2721'
-    ].includes(secVal);
-
-    if (isRedSection) {
-      const redFill = '#dc2626'; // Red 600
-      const redBorder = '#991b1b'; // Darker Red
-      return {
-        fillColor: redFill,
-        fillOpacity: isSelected ? 0.75 : 0.45,
-        color: isSelected ? '#ffffff' : redBorder,
-        weight: isSelected ? 4 : 2.5
-      };
-    }
-
-    // Specific blue sections requested by the user: 1022, 1210, 2748
-    const isBlueSection = secVal && [
-      '1022', '1210', '2748'
-    ].includes(secVal);
-
-    if (isBlueSection) {
-      const blueFill = '#2563eb'; // Blue 600
-      const blueBorder = '#1d4ed8'; // Darker Blue
-      return {
-        fillColor: blueFill,
-        fillOpacity: isSelected ? 0.75 : 0.45,
-        color: isSelected ? '#ffffff' : blueBorder,
-        weight: isSelected ? 4 : 2.5
-      };
-    }
-
-    // Specific purple sections requested by the user: 1052, 1060, 1061, 1141, 1142
-    const isPurpleSection = secVal && [
-      '1052', '1060', '1061', '1141', '1142'
-    ].includes(secVal);
-
-    if (isPurpleSection) {
-      const purpleFill = '#9333ea'; // Purple 600
-      const purpleBorder = '#6b21a8'; // Darker Purple
-      return {
-        fillColor: purpleFill,
-        fillOpacity: isSelected ? 0.75 : 0.45,
-        color: isSelected ? '#ffffff' : purpleBorder,
-        weight: isSelected ? 4 : 2.5
-      };
-    }
 
     if (coloringMode === 'random') {
       const color = randomColors[feature.id] || '#3b82f6';
@@ -770,12 +1022,12 @@ export default function App() {
       };
     }
 
-    // Default: Red color as requested by the user for perfect contrast on satellite map
-    const redColor = '#ef4444';
+    // Default: Dynamic Brigade color assignment
+    const bInfo = getFeatureBrigadeInfo(feature);
     return {
-      fillColor: redColor,
-      fillOpacity: isSelected ? 0.7 : 0.4,
-      color: isSelected ? '#ffffff' : '#b91c1c',
+      fillColor: bInfo.color,
+      fillOpacity: isSelected ? 0.75 : 0.45,
+      color: isSelected ? '#ffffff' : bInfo.border,
       weight: isSelected ? 4 : 2.5
     };
   };
@@ -786,54 +1038,39 @@ export default function App() {
   const [isColorWidgetCollapsed, setIsColorWidgetCollapsed] = useState(false);
   const [isDetailsCollapsed, setIsDetailsCollapsed] = useState(false);
 
-  // Group active features by their style color dynamically
+  // Group active features by their Brigade and distinct assigned color
   const colorGroups = useMemo(() => {
-    const groups: Record<string, { color: string; friendlyName: string; features: KmlFeature[] }> = {};
+    const groups: Record<string, { key: string; color: string; friendlyName: string; features: KmlFeature[] }> = {};
     
     activeFeatures.forEach(f => {
+      const bInfo = getFeatureBrigadeInfo(f);
       const style = getFeatureStyle(f);
-      const color = style.fillColor || '#475569';
       
-      if (!groups[color]) {
-        groups[color] = {
-          color: color,
-          friendlyName: '',
+      if (!groups[bInfo.key]) {
+        groups[bInfo.key] = {
+          key: bInfo.key,
+          color: style.fillColor || bInfo.color,
+          friendlyName: bInfo.name,
           features: []
         };
       }
-      groups[color].features.push(f);
+      groups[bInfo.key].features.push(f);
     });
 
-    const getColorPriority = (hex: string): number => {
-      const upperHex = hex.toUpperCase();
-      // Verde -> Priority 1 (Brigada 1)
-      if (upperHex === '#16A34A' || upperHex === 'GREEN' || upperHex === 'EMERALD' || upperHex === '#15803D') return 1;
-      // Café -> Priority 2 (Brigada 2)
-      if (upperHex === '#8B4513' || upperHex === 'SADDLEBROWN' || upperHex === '#5C2E0B') return 2;
-      // Roja -> Priority 3 (Brigada 3)
-      if (upperHex === '#DC2626' || upperHex === 'RED' || upperHex === '#991B1B') return 3;
-      // Azul -> Priority 4 (Brigada 4)
-      if (upperHex === '#2563EB' || upperHex === 'BLUE' || upperHex === '#1D4ED8') return 4;
-      // Morada -> Priority 5 (Brigada 5)
-      if (upperHex === '#9333EA' || upperHex === 'PURPLE' || upperHex === '#6B21A8') return 5;
-      return 100; // fallback for custom/random colors
+    const getBrigadeNumber = (name: string): number => {
+      const match = name.match(/\d+/);
+      return match ? parseInt(match[0], 10) : 999;
     };
     
-    // Sort so groups always display in the custom color priority sequence
+    // Sort so Brigada 1, Brigada 2, Brigada 3, Brigada 4, Brigada 5 appear in natural sequence
     const sortedGroups = Object.values(groups).sort((a, b) => {
-      const prioA = getColorPriority(a.color);
-      const prioB = getColorPriority(b.color);
-      if (prioA !== prioB) {
-        return prioA - prioB;
-      }
-      return b.features.length - a.features.length; // fallback
+      const numA = getBrigadeNumber(a.friendlyName);
+      const numB = getBrigadeNumber(b.friendlyName);
+      if (numA !== numB) return numA - numB;
+      return a.friendlyName.localeCompare(b.friendlyName);
     });
     
-    // Assign "Brigada X" consecutively
-    return sortedGroups.map((group, index) => ({
-      ...group,
-      friendlyName: `Brigada ${index + 1}`
-    }));
+    return sortedGroups;
   }, [activeFeatures, coloringMode, colorByProperty, randomColors]);
 
   const preventMapAction = (e: React.MouseEvent | React.WheelEvent) => {
@@ -869,64 +1106,7 @@ export default function App() {
   };
 
   const handleKmlFile = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const text = e.target?.result as string;
-      if (text) {
-        loadSampleKml(text);
-        setIsSavingToServer(true);
-        setServerSaveMessage(null);
-        
-        let firestoreSuccess = false;
-        try {
-          console.log("Auto-guardando KML subido en Firestore...");
-          await saveKmlToFirestore(text, currentUser?.email || 'bunkerhrv@gmail.com');
-          console.log("¡KML auto-guardado en Firestore con éxito!");
-          firestoreSuccess = true;
-        } catch (fErr) {
-          console.error("Error al auto-guardar KML en Firestore:", fErr);
-        }
-
-        let serverSuccess = false;
-        try {
-          const res = await fetch('/api/kml', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ kmlText: text })
-          });
-          const data = await res.json();
-          if (data.success) {
-            serverSuccess = true;
-          }
-        } catch (sErr) {
-          console.warn("Error saving to local Express server:", sErr);
-        }
-
-        setIsSavingToServer(false);
-        if (firestoreSuccess) {
-          setServerSaveMessage({
-            type: 'success',
-            text: '¡KML guardado permanentemente en la Base de Datos de Firebase!'
-          });
-        } else if (serverSuccess) {
-          setServerSaveMessage({
-            type: 'success',
-            text: '¡KML guardado en el servidor local!'
-          });
-        } else {
-          setServerSaveMessage({
-            type: 'error',
-            text: 'Cargado en el mapa, pero no se pudo sincronizar en línea (revisa tu conexión).'
-          });
-        }
-      }
-    };
-    reader.onerror = () => {
-      setErrorMsg('Error al leer el archivo KML.');
-    };
-    reader.readAsText(file);
+    handleKmlFileSelected(file, targetDistrictId || 'distrito-11');
   };
 
   const handleDrag = (e: React.DragEvent) => {
@@ -1022,11 +1202,80 @@ export default function App() {
   return (
     <div className="h-screen w-screen flex flex-col bg-[#050505] text-[#e2e8f0] overflow-hidden font-sans">
       
+      {firestoreQuotaExceeded && (
+        <div className="bg-amber-950/90 border-b border-amber-800/60 text-amber-100 px-4 py-2 text-xs flex flex-col md:flex-row md:items-center justify-between gap-2 z-30 transition-all duration-300">
+          <div className="flex items-center gap-2">
+            <span className="text-sm">⚠️</span>
+            <div>
+              <p className="font-semibold text-amber-200">
+                Se ha excedido la cuota diaria gratuita de Firebase Firestore. El visor está operando con la caché local y el servidor API de respaldo.
+              </p>
+              <p className="text-[10px] text-amber-300/80 font-mono">
+                Error: Quota exceeded for quota metric 'Free daily read units per project (free tier database)'.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <a 
+              href="https://console.firebase.google.com/project/asymmetric-axon-bt3g1/firestore/databases/ai-studio-hcmap-8888b844-b892-4aea-8a10-57ec75a46d0c/data?openUpgradeDialog=true"
+              target="_blank" 
+              rel="noopener noreferrer" 
+              className="bg-amber-800/40 hover:bg-amber-800/70 border border-amber-700/50 text-amber-200 font-semibold px-2.5 py-1 rounded transition whitespace-nowrap"
+            >
+              Ver Consola de Firebase
+            </a>
+            <button 
+              onClick={() => setFirestoreQuotaExceeded(false)}
+              className="text-amber-400 hover:text-amber-200 font-bold px-1 text-sm select-none cursor-pointer"
+              title="Descartar"
+            >
+              &times;
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Elegant Header */}
-      <header className="h-[60px] bg-[#0f172a] border-b border-[#1e293b] flex items-center px-6 justify-between flex-shrink-0 z-20">
-        <div className="flex items-center">
-          <span className="font-extrabold tracking-tight text-red-500 text-lg">HC.MAP</span>
-          <span className="ml-3 text-[#475569] text-xs font-semibold px-2 py-0.5 bg-slate-950/45 rounded border border-slate-800/40">Visor de Capas</span>
+      <header className="h-[60px] bg-[#0f172a] border-b border-[#1e293b] flex items-center px-4 sm:px-6 justify-between flex-shrink-0 z-20">
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl border text-xs font-bold transition select-none cursor-pointer ${
+              isSidebarOpen 
+                ? 'bg-blue-600/20 text-blue-400 border-blue-500/40' 
+                : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
+            }`}
+            title="Activar / Desactivar Barra Lateral de Distritos y Brigadas"
+          >
+            <Layers className="w-4 h-4 text-blue-400" />
+            <span className="hidden sm:inline">Distritos & Brigadas</span>
+            <span className="bg-blue-500/20 text-blue-300 text-[10px] font-mono px-1.5 py-0.2 rounded">
+              {districts.filter(d => d.enabled).length}/{districts.length}
+            </span>
+          </button>
+
+          <div className="flex items-center">
+            <span className="font-extrabold tracking-tight text-red-500 text-lg">HC.MAP</span>
+            <span className="ml-2 text-[#475569] text-xs font-semibold px-2 py-0.5 bg-slate-950/45 rounded border border-slate-800/40 hidden md:inline">Visor de Capas</span>
+          </div>
+
+          {/* Quick District Pills in Header */}
+          <div className="hidden lg:flex items-center space-x-1.5 pl-2">
+            {districts.map(d => (
+              <button
+                key={d.id}
+                onClick={() => toggleDistrict(d.id)}
+                className={`text-[10px] font-bold px-2.5 py-1 rounded-full border transition flex items-center space-x-1.5 ${
+                  d.enabled 
+                    ? 'bg-slate-900 text-slate-200 border-slate-700' 
+                    : 'bg-slate-950/60 text-slate-600 border-slate-900 line-through'
+                }`}
+              >
+                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: d.color }}></span>
+                <span>{d.name}</span>
+              </button>
+            ))}
+          </div>
         </div>
         
         {/* Google Authentication Account Profile Selector */}
@@ -1139,42 +1388,6 @@ export default function App() {
                 </div>
               )}
 
-              {/* Manual Custom Email Form - Only shown to Admins */}
-              {isAdmin && (
-                <div className="py-3 border-b border-slate-800 space-y-2">
-                  <p className="text-[9px] uppercase font-bold text-slate-500 tracking-wider text-left">Probar con otro correo de Google:</p>
-                  <div className="flex items-center space-x-1.5">
-                    <input
-                      type="email"
-                      placeholder="ejemplo@gmail.com"
-                      value={customEmailInput}
-                      onChange={(e) => setCustomEmailInput(e.target.value)}
-                      className="flex-1 bg-slate-950 text-xs px-2.5 py-1.5 rounded-lg border border-slate-800 text-slate-200 outline-none focus:border-slate-600"
-                    />
-                    <button
-                      onClick={() => {
-                        if (customEmailInput.trim().includes('@')) {
-                          const email = customEmailInput.trim().toLowerCase();
-                          const isHugo = email === 'hugocesarlemuscortes@gmail.com';
-                          const u = { 
-                            email, 
-                            name: isHugo ? 'Hugo César Lemus Cortés' : email.split('@')[0], 
-                            avatar: email[0].toUpperCase() 
-                          };
-                          setCurrentUser(u);
-                          localStorage.setItem('google_user', JSON.stringify(u));
-                          setIsProfileOpen(false);
-                          setCustomEmailInput('');
-                        }
-                      }}
-                      className="bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg transition cursor-pointer"
-                    >
-                      Usar
-                    </button>
-                  </div>
-                </div>
-              )}
-
               <button
                 onClick={() => {
                   setCurrentUser(null);
@@ -1192,360 +1405,232 @@ export default function App() {
       </header>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
         
-        {/* LEFT PANEL: Controls & Data list */}
-        {isAdmin && (
-          <aside className="w-full md:w-[320px] flex-shrink-0 border-b md:border-b-0 md:border-r border-[#1e293b] flex flex-col bg-[#0f172a] max-h-[45vh] md:max-h-full">
-          
-          {/* Sidebar Header */}
-          <div className="p-4 border-b border-[#1e293b] flex items-center justify-between">
-            <div className="flex items-center space-x-2.5">
-              <div className="p-1.5 bg-[#3b82f6]/10 text-[#3b82f6] border border-[#3b82f6]/20 rounded-lg">
-                <MapIcon className="w-4 h-4" />
+        {/* LEFT SIDEBAR: Distritos & Brigadas Management */}
+        {isSidebarOpen && (
+          <aside className="w-full md:w-[360px] lg:w-[380px] flex-shrink-0 border-b md:border-b-0 md:border-r border-[#1e293b] flex flex-col bg-[#0f172a] max-h-[50vh] md:max-h-full z-10 transition-all duration-300 shadow-xl">
+            
+            {/* Sidebar Title & Quick Actions */}
+            <div className="p-3.5 border-b border-[#1e293b] bg-slate-900/60 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <div className="p-1.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-lg">
+                  <Layers className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="font-bold text-slate-100 text-xs tracking-wide">Distritos y Brigadas</h2>
+                  <span className="text-[10px] text-slate-400 font-mono block">Gestión Multi-Capa</span>
+                </div>
               </div>
-              <div>
-                <h2 className="font-bold text-slate-100 text-xs tracking-wide">Áreas & Capas</h2>
-                <span className="text-[10px] text-[#64748b] font-mono leading-none block">Geometría KML</span>
+
+              <div className="flex items-center space-x-1.5">
+                <button
+                  onClick={() => setNewDistrictModalOpen(true)}
+                  className="px-2.5 py-1 bg-purple-950/50 hover:bg-purple-900/70 text-purple-300 border border-purple-800/40 rounded-lg text-xs font-semibold transition flex items-center space-x-1 cursor-pointer"
+                  title="Agregar un nuevo Distrito"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span className="text-[10px]">Nuevo Distrito</span>
+                </button>
+                <button
+                  onClick={() => setIsSidebarOpen(false)}
+                  className="p-1 text-slate-400 hover:text-slate-200 rounded-lg transition md:hidden"
+                  title="Cerrar barra lateral"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
             </div>
-            {kmlDoc && (
-              <button 
-                onClick={() => {
-                  setKmlDoc(null);
-                  setSelectedFeature(null);
-                  localStorage.removeItem('persisted_kml_content');
-                  localStorage.removeItem('persisted_kml_name');
-                }}
-                className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800/80 rounded-lg transition"
-                title="Cerrar documento actual"
+
+            {/* Scrollable District & File List */}
+            <div className="flex-1 overflow-y-auto p-3.5 space-y-4 custom-scrollbar">
+              
+              {/* Dropzone for drag-and-drop file upload */}
+              <div 
+                onDragEnter={handleDrag}
+                onDragOver={handleDrag}
+                onDragLeave={handleDrag}
+                onDrop={handleDrop}
+                onClick={triggerFileSelect}
+                className={`border-2 border-dashed rounded-xl p-3 text-center cursor-pointer transition flex items-center justify-center space-x-2.5 ${
+                  dragActive 
+                    ? 'border-blue-500 bg-blue-500/10' 
+                    : 'border-slate-800 hover:border-slate-700 bg-slate-950/50'
+                }`}
               >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-
-          {/* Scrollable content areas */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-5">
-            
-            {/* 1. If NO KML file loaded, prompt to load or select sample */}
-            {!kmlDoc && (
-              <div className="space-y-4">
-                <div 
-                  onDragEnter={handleDrag}
-                  onDragOver={handleDrag}
-                  onDragLeave={handleDrag}
-                  onDrop={handleDrop}
-                  onClick={triggerFileSelect}
-                  className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition flex flex-col items-center justify-center space-y-3 ${
-                    dragActive 
-                      ? 'border-blue-500 bg-blue-500/5' 
-                      : 'border-slate-800 hover:border-slate-700 hover:bg-slate-800/45'
-                  }`}
-                >
-                  <div className="p-3 bg-slate-800 rounded-full border border-slate-700 text-slate-300">
-                    <Upload className="w-6 h-6 text-blue-400" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-slate-200">Sube tu archivo KML</p>
-                    <p className="text-xs text-[#64748b] mt-1">Arrastra tu archivo aquí o haz clic para subir</p>
-                  </div>
-                </div>
-
-                <div className="relative flex items-center justify-center my-4">
-                  <span className="absolute bg-[#0f172a] px-3 text-[10px] text-slate-500 uppercase tracking-wider font-bold">o carga un ejemplo libre</span>
-                  <div className="w-full border-t border-slate-800"></div>
-                </div>
-
-                <div className="space-y-2.5">
-                  {SAMPLES.map(sample => (
-                    <button
-                      key={sample.id}
-                      onClick={() => loadSampleKml(sample.content, true)}
-                      className="w-full text-left p-3 bg-[#1e293b]/50 hover:bg-[#1e293b]/90 border border-slate-800 hover:border-slate-700 rounded-xl transition flex flex-col space-y-1 group"
-                    >
-                      <span className="text-xs font-semibold text-slate-200 flex items-center justify-between">
-                        {sample.name}
-                        <Sparkles className="w-3 h-3 text-blue-400 opacity-0 group-hover:opacity-100 transition" />
-                      </span>
-                      <span className="text-[10px] text-[#94a3b8] line-clamp-2 leading-normal">{sample.description}</span>
-                    </button>
-                  ))}
+                <Upload className="w-4 h-4 text-blue-400 flex-shrink-0" />
+                <div className="text-left min-w-0">
+                  <p className="text-xs font-semibold text-slate-200">Subir nuevo archivo KML</p>
+                  <p className="text-[10px] text-slate-400">Vincula un KML a cualquier Distrito y Brigada</p>
                 </div>
               </div>
-            )}
 
-            {/* 2. Document details & controls when loaded */}
-            {kmlDoc && (
-              <div className="space-y-4">
-                <div className="p-3 bg-[#1e293b] border border-[#334155] rounded-xl flex items-start space-x-2.5">
-                  <FileText className="w-4 h-4 text-[#3b82f6] mt-0.5" />
-                  <div className="space-y-0.5 animate-fadeIn">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Documento activo:</p>
-                    <h3 className="text-xs font-bold text-slate-200 leading-tight truncate w-56">{kmlDoc.name}</h3>
-                    <p className="text-[10px] text-[#94a3b8]">
-                      {filterSeccionesActive && hasSeccionProperties 
-                        ? `${activeFeatures.length} de ${kmlDoc.features.length} secciones` 
-                        : `${kmlDoc.features.length} elementos geográficos.`
-                      }
-                    </p>
-                  </div>
-                </div>
+              {/* Districts Container */}
+              <div className="space-y-3">
+                {districts.map(dist => {
+                  const totalKmls = dist.kmlFiles.length;
+                  const totalPolygons = dist.kmlFiles.reduce((acc, f) => acc + (f.kmlDoc?.features?.length || 0), 0);
 
-                {/* Server persistence option for Admins */}
-                {isAdmin && (
-                  <div className="bg-blue-950/25 border border-blue-900/40 rounded-xl p-3.5 space-y-2.5 animate-fadeIn">
-                    <div className="flex items-center space-x-2">
-                      <Database className="w-4 h-4 text-blue-400" />
-                      <span className="text-[11px] font-bold text-slate-200 uppercase tracking-wide">Base de Datos Servidor</span>
-                    </div>
-                    <p className="text-[10px] text-slate-300 leading-normal">
-                      Como Administrador, puedes guardar este mapa en el servidor de forma que sea la capa predeterminada para todos los usuarios normales al ingresar.
-                    </p>
-                    
-                    {serverSaveMessage && (
-                      <div className={`p-2 rounded text-[10px] font-semibold leading-normal ${
-                        serverSaveMessage.type === 'success' 
-                          ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/40 animate-pulse' 
-                          : 'bg-rose-950/40 text-rose-400 border border-rose-900/40'
-                      }`}>
-                        {serverSaveMessage.text}
-                      </div>
-                    )}
-
-                    <button
-                      onClick={saveKmlToServer}
-                      disabled={isSavingToServer}
-                      className="w-full flex items-center justify-center space-x-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white font-bold py-2 px-3 rounded-lg text-xs transition cursor-pointer select-none"
+                  return (
+                    <div 
+                      key={dist.id}
+                      className={`border rounded-xl transition-all overflow-hidden ${
+                        dist.enabled 
+                          ? 'bg-[#1e293b]/50 border-slate-700/80' 
+                          : 'bg-slate-950/40 border-slate-900 opacity-60'
+                      }`}
                     >
-                      {isSavingToServer ? (
-                        <span>Guardando en el Servidor...</span>
-                      ) : (
-                        <>
-                          <Upload className="w-3.5 h-3.5" />
-                          <span>Guardar en el Servidor</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                )}
-
-                {/* Advanced coloring controls */}
-                <div className="bg-[#1e293b]/40 border border-[#334155]/60 rounded-xl p-3.5 space-y-3">
-                  <div className="flex items-center space-x-1.5 text-xs font-semibold text-slate-300">
-                    <Sliders className="w-3.5 h-3.5 text-blue-400" />
-                    <span>Estilos de Visualización</span>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[10px] uppercase font-bold text-[#64748b] tracking-wider">Colorear Por</label>
-                    <div className="grid grid-cols-3 gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-[10px]">
-                      <button
-                        onClick={() => setColoringMode('kml')}
-                        className={`py-1 rounded text-center transition font-semibold ${coloringMode === 'kml' ? 'bg-[#3b82f6] text-white' : 'text-slate-400 hover:text-slate-200'}`}
-                      >
-                        Original
-                      </button>
-                      <button
-                        onClick={() => setColoringMode('random')}
-                        className={`py-1 rounded text-center transition font-semibold ${coloringMode === 'random' ? 'bg-[#3b82f6] text-white' : 'text-slate-400 hover:text-slate-200'}`}
-                      >
-                        Al Azar
-                      </button>
-                      <button
-                        disabled={extendedKeys.length === 0}
-                        onClick={() => setColoringMode('property')}
-                        className={`py-1 rounded text-center transition font-semibold ${coloringMode === 'property' ? 'bg-[#3b82f6] text-white' : 'text-slate-400 hover:text-slate-200'} disabled:opacity-30`}
-                      >
-                        Atributo
-                      </button>
-                    </div>
-                  </div>
-
-                  {coloringMode === 'property' && extendedKeys.length > 0 && (
-                    <div className="space-y-1.5 animate-fadeIn">
-                      <label className="text-[9px] uppercase font-bold text-slate-500 tracking-wider">Seleccionar propiedad:</label>
-                      <select
-                        value={colorByProperty}
-                        onChange={(e) => setColorByProperty(e.target.value)}
-                        className="w-full text-xs bg-slate-950 text-slate-200 border border-slate-800 rounded-lg p-2 focus:ring-1 focus:ring-blue-500 outline-none"
-                      >
-                        {extendedKeys.map(k => (
-                          <option key={k} value={k}>{k}</option>
-                        ))}
-                      </select>
-
-                      {/* Category Legend */}
-                      {propertyUniqueValues.length > 0 && (
-                        <div className="mt-2 bg-slate-950 border border-slate-900 rounded-lg p-2 max-h-24 overflow-y-auto space-y-1">
-                          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Leyenda ({propertyUniqueValues.length} val.)</p>
-                          <div className="space-y-1">
-                            {propertyUniqueValues.map((val, idx) => {
-                              const total = propertyUniqueValues.length;
-                              const hue = total > 1 ? (idx * (360 / total)) : 140;
-                              const col = `hsl(${hue}, 75%, 45%)`;
-                              return (
-                                <div key={val} className="flex items-center space-x-1.5 text-xxs">
-                                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: col }}></span>
-                                  <span className="text-slate-300 truncate">{val}</span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* 30 Secciones Filter Card */}
-                {hasSeccionProperties && (
-                  <div className="bg-[#1e293b]/40 border border-[#334155]/60 rounded-xl p-3.5 space-y-2.5 shadow-md animate-fadeIn">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-1.5 text-xs font-semibold text-slate-300">
-                        <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
-                        <span>Filtro de Secciones</span>
-                      </div>
-                      <span className="text-[10px] bg-blue-950/80 text-blue-400 font-extrabold px-1.5 py-0.5 rounded border border-blue-900/30">
-                        {activeFeatures.length} / {kmlDoc.features.length}
-                      </span>
-                    </div>
-
-                    <p className="text-[10px] text-slate-400 leading-relaxed">
-                      Se filtran automáticamente los polígonos para mantener visible únicamente las 30 secciones autorizadas.
-                    </p>
-
-                    <div className="flex items-center justify-between pt-1">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Filtrar por Lista</span>
-                      <button
-                        onClick={() => setFilterSeccionesActive(!filterSeccionesActive)}
-                        className={`text-[10px] font-bold px-2.5 py-1 rounded-md border transition-all ${
-                          filterSeccionesActive 
-                            ? 'bg-blue-600/20 text-blue-400 border-blue-500/30 hover:bg-blue-600/30' 
-                            : 'bg-slate-950 text-slate-500 border-slate-850 hover:text-slate-300'
-                        }`}
-                      >
-                        {filterSeccionesActive ? 'ACTIVO' : 'DESACTIVADO'}
-                      </button>
-                    </div>
-
-                    {/* Show preview of allowed sections */}
-                    {filterSeccionesActive && (
-                      <div className="pt-2 border-t border-slate-800/80">
-                        <p className="text-[9px] font-bold text-[#64748b] uppercase tracking-wider mb-1.5">Secciones Permitidas (30):</p>
-                        <div className="flex flex-wrap gap-1 max-h-[70px] overflow-y-auto pr-1">
-                          {ALLOWED_SECCIONES.map(sec => (
-                            <span key={sec} className="text-[9px] font-mono px-1.5 py-0.5 bg-slate-950/80 text-[#94a3b8] rounded border border-slate-900/40">
-                              {sec}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Upload secondary KML */}
-                <div className="flex gap-2">
-                  <button
-                    onClick={triggerFileSelect}
-                    className="flex-1 py-2 px-3 bg-[#1e293b] hover:bg-[#2d3748] border border-[#334155] text-xs font-semibold rounded-lg text-slate-200 transition flex items-center justify-center space-x-1.5"
-                  >
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>Cargar otro KML</span>
-                  </button>
-                  <button
-                    onClick={() => setFitAllTrigger(prev => prev + 1)}
-                    className="py-2 px-3 bg-slate-950 hover:bg-slate-900 border border-slate-800 text-xs font-semibold rounded-lg text-slate-300 transition flex items-center justify-center"
-                    title="Ajustar vista a todos los elementos"
-                  >
-                    <Compass className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                {/* List Search & Features */}
-                <div className="space-y-2">
-                  <div className="relative">
-                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                    <input
-                      type="text"
-                      placeholder="Buscar áreas o propiedades..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full bg-slate-950 text-xs text-slate-200 border border-slate-850 pl-8 pr-3 py-2 rounded-lg outline-none focus:border-slate-750"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5 max-h-[22vh] md:max-h-[35vh] overflow-y-auto pr-1">
-                    {filteredFeatures.map(f => {
-                      const isSelected = selectedFeature?.id === f.id;
-                      const style = getFeatureStyle(f);
-                      const isPolygon = f.geometryType === 'Polygon';
-                      const isLine = f.geometryType === 'LineString';
-                      const isPoint = f.geometryType === 'Point';
-
-                      return (
-                        <div
-                          key={f.id}
-                          onClick={() => {
-                            setSelectedFeature(f);
-                            setFitBoundsTrigger(prev => prev + 1);
-                            setIsDetailsCollapsed(false);
-                          }}
-                          className={`w-full text-left p-2.5 rounded-lg border text-xs transition cursor-pointer flex items-center justify-between group ${
-                            isSelected 
-                              ? 'bg-[#1e293b] border-[#3b82f6] text-slate-100' 
-                              : 'bg-slate-950/45 border-slate-900 hover:border-[#334155] text-slate-300'
-                          }`}
-                        >
-                          <div className="flex items-center space-x-2 min-w-0">
-                            {/* Color Legend indicator */}
-                            <span 
-                              className="w-2.5 h-2.5 rounded-full flex-shrink-0 border border-black/10" 
-                              style={{ 
-                                backgroundColor: isPolygon ? style.fillColor : style.color
-                              }}
-                            ></span>
-                            <div className="min-w-0">
-                              <p className="font-semibold truncate leading-snug">{f.name}</p>
-                              <p className="text-[10px] text-[#64748b] font-mono leading-none mt-0.5">
-                                {isPolygon ? 'Polígono' : isLine ? 'Línea' : isPoint ? 'Punto' : 'Desconocido'}
-                              </p>
-                            </div>
-                          </div>
-
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedFeature(f);
-                              setFitBoundsTrigger(prev => prev + 1);
-                              setIsDetailsCollapsed(false);
-                            }}
-                            className="p-1 text-slate-500 hover:text-blue-400 rounded transition opacity-0 group-hover:opacity-100"
-                            title="Enfocar en mapa"
+                      {/* District Header & Master Toggle */}
+                      <div className="p-3 bg-slate-900/80 flex items-center justify-between border-b border-slate-800/80">
+                        <div className="flex items-center space-x-2.5 min-w-0">
+                          <button
+                            onClick={() => toggleDistrict(dist.id)}
+                            className={`w-4 h-4 rounded border flex items-center justify-center transition cursor-pointer ${
+                              dist.enabled 
+                                ? 'bg-blue-600 border-blue-500 text-white' 
+                                : 'bg-slate-950 border-slate-800 text-transparent'
+                            }`}
+                            title={dist.enabled ? 'Desactivar vista de este distrito' : 'Activar vista de este distrito'}
                           >
-                            <Eye className="w-3.5 h-3.5" />
+                            <Check className="w-3 h-3 stroke-[3]" />
                           </button>
+                          <div className="min-w-0">
+                            <div className="flex items-center space-x-1.5">
+                              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: dist.color }}></span>
+                              <h3 className="text-xs font-bold text-slate-200 truncate">{dist.name}</h3>
+                            </div>
+                            <p className="text-[10px] text-slate-400 truncate mt-0.5">
+                              {totalKmls} {totalKmls === 1 ? 'archivo KML' : 'archivos KML'} · {totalPolygons} elementos
+                            </p>
+                          </div>
                         </div>
-                      );
-                    })}
 
-                    {filteredFeatures.length === 0 && (
-                      <div className="p-4 text-center border border-dashed border-slate-800 rounded-lg text-xs text-slate-500">
-                        No se encontraron resultados para la búsqueda.
+                        <button
+                          onClick={() => {
+                            setTargetDistrictId(dist.id);
+                            triggerFileSelect();
+                          }}
+                          className="px-2 py-1 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 rounded-lg text-[10px] font-bold transition flex items-center space-x-1 cursor-pointer"
+                          title={`Subir archivo KML a ${dist.name}`}
+                        >
+                          <Upload className="w-3 h-3" />
+                          <span>+ Subir KML</span>
+                        </button>
                       </div>
-                    )}
+
+                      {/* District KML Files List */}
+                      <div className="p-2 space-y-1.5 bg-slate-950/30">
+                        {dist.kmlFiles.length === 0 ? (
+                          <div className="p-3 text-center border border-dashed border-slate-800/80 rounded-lg">
+                            <p className="text-[11px] text-slate-500">Sin archivos KML en este distrito.</p>
+                            <button
+                              onClick={() => {
+                                setTargetDistrictId(dist.id);
+                                triggerFileSelect();
+                              }}
+                              className="mt-1.5 text-[10px] text-blue-400 font-semibold hover:underline inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              <Upload className="w-3 h-3" />
+                              Subir KML a {dist.name}
+                            </button>
+                          </div>
+                        ) : (
+                          dist.kmlFiles.map(file => (
+                            <div 
+                              key={file.id}
+                              className={`p-2 rounded-lg border text-xs flex items-center justify-between transition ${
+                                file.enabled 
+                                  ? 'bg-slate-900/90 border-slate-800 text-slate-200' 
+                                  : 'bg-slate-950/60 border-slate-900 text-slate-500 line-through'
+                              }`}
+                            >
+                              <div className="flex items-center space-x-2 min-w-0 pr-2">
+                                <button
+                                  onClick={() => toggleKmlFile(dist.id, file.id)}
+                                  className="text-slate-400 hover:text-blue-400 transition flex-shrink-0 cursor-pointer"
+                                  title={file.enabled ? 'Ocultar capa' : 'Mostrar capa'}
+                                >
+                                  {file.enabled ? <Eye className="w-3.5 h-3.5 text-blue-400" /> : <EyeOff className="w-3.5 h-3.5 text-slate-600" />}
+                                </button>
+                                <div className="min-w-0">
+                                  <p className="font-semibold text-[11px] truncate">{file.name}</p>
+                                  <div className="flex items-center space-x-1.5 mt-0.5">
+                                    <span className="text-[9px] font-mono font-bold bg-slate-800 text-blue-300 px-1.5 py-0.2 rounded border border-slate-700/50">
+                                      {file.brigade || 'General'}
+                                    </span>
+                                    <span className="text-[9px] text-slate-500">
+                                      {file.kmlDoc?.features?.length || 0} elem.
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <button
+                                onClick={() => deleteKmlFile(dist.id, file.id)}
+                                className="p-1 text-slate-500 hover:text-rose-400 rounded transition cursor-pointer"
+                                title="Eliminar este archivo KML"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* General Filters & Tools Section */}
+              <div className="bg-[#1e293b]/40 border border-[#334155]/60 rounded-xl p-3 space-y-3">
+                <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
+                  <div className="flex items-center space-x-1.5">
+                    <Sliders className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Filtros y Estilos</span>
                   </div>
+                  <span className="text-[10px] bg-blue-950 text-blue-400 px-2 py-0.5 rounded font-mono font-bold">
+                    {activeFeatures.length} activos
+                  </span>
+                </div>
+
+                {/* 30 Secciones Filter Toggle */}
+                <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
+                  <div>
+                    <span className="text-[11px] font-bold text-slate-300 block">Filtro 30 Secciones</span>
+                    <span className="text-[9px] text-slate-500 block">Mantiene únicamente las 30 secciones autorizadas</span>
+                  </div>
+                  <button
+                    onClick={() => setFilterSeccionesActive(!filterSeccionesActive)}
+                    className={`text-[10px] font-bold px-2.5 py-1 rounded-md border transition-all cursor-pointer ${
+                      filterSeccionesActive 
+                        ? 'bg-blue-600/20 text-blue-400 border-blue-500/30' 
+                        : 'bg-slate-950 text-slate-500 border-slate-850'
+                    }`}
+                  >
+                    {filterSeccionesActive ? 'ACTIVO' : 'DESACTIVADO'}
+                  </button>
+                </div>
+
+                {/* Search Bar */}
+                <div className="relative pt-1">
+                  <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-slate-500" />
+                  <input
+                    type="text"
+                    placeholder="Buscar sección, área o brigada..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full bg-slate-950 text-xs text-slate-200 border border-slate-800 pl-8 pr-3 py-1.5 rounded-lg outline-none focus:border-blue-500"
+                  />
                 </div>
               </div>
-            )}
-          </div>
+            </div>
 
-          {/* Sidebar Footer */}
-          <div className="p-3 border-t border-[#1e293b] bg-slate-950 text-center text-[10px] text-[#64748b]">
-            Visualizador de Áreas KML · {new Date().getFullYear()}
-          </div>
-        </aside>
+            {/* Sidebar Footer */}
+            <div className="p-3 border-t border-[#1e293b] bg-slate-950 text-center text-[10px] text-[#64748b] flex items-center justify-between">
+              <span>Gestor de Capas y Distritos</span>
+              <span className="font-mono">{activeFeatures.length} polígonos</span>
+            </div>
+          </aside>
         )}
 
         {/* RIGHT PANEL: Leaflet Map & Details Overlay */}
@@ -1619,12 +1704,12 @@ export default function App() {
                       {colorGroups.map(group => {
                         return (
                           <button
-                            key={group.color}
+                            key={group.key}
                             onClick={() => {
-                              setSelectedColorGroup(group.color);
+                              setSelectedColorGroup(group.key);
                               setGroupSearchQuery('');
                             }}
-                            className="w-full flex items-center justify-between p-1.5 sm:p-2 rounded-lg sm:rounded-xl border border-slate-800 hover:border-slate-700 bg-slate-900/50 hover:bg-slate-900 transition text-left group"
+                            className="w-full flex items-center justify-between p-1.5 sm:p-2 rounded-lg sm:rounded-xl border border-slate-800 hover:border-slate-700 bg-slate-900/50 hover:bg-slate-900 transition text-left group cursor-pointer"
                           >
                             <div className="flex items-center space-x-1.5 sm:space-x-2.5 min-w-0">
                               <span 
@@ -1655,20 +1740,25 @@ export default function App() {
                             setSelectedColorGroup(null);
                             setGroupSearchQuery('');
                           }}
-                          className="flex items-center text-[8px] sm:text-[10px] font-bold text-blue-400 hover:text-blue-300 transition uppercase tracking-wider"
+                          className="flex items-center text-[8px] sm:text-[10px] font-bold text-blue-400 hover:text-blue-300 transition uppercase tracking-wider cursor-pointer"
                         >
                           <ArrowLeft className="w-3 h-3 sm:w-3.5 h-3.5 mr-1" /> Atrás
                         </button>
                         
-                        <div className="flex items-center space-x-1 sm:space-x-1.5">
-                          <span 
-                            className="w-2 h-2 sm:w-2.5 h-2.5 rounded-full border border-white/20 shadow-sm"
-                            style={{ backgroundColor: selectedColorGroup }}
-                          />
-                          <span className="text-[9px] sm:text-[10px] font-semibold text-slate-300 max-w-[90px] sm:max-w-[120px] truncate">
-                            {colorGroups.find(g => g.color === selectedColorGroup)?.friendlyName || 'Brigada'}
-                          </span>
-                        </div>
+                        {(() => {
+                          const activeGrp = colorGroups.find(g => g.key === selectedColorGroup || g.color === selectedColorGroup);
+                          return (
+                            <div className="flex items-center space-x-1 sm:space-x-1.5">
+                              <span 
+                                className="w-2 h-2 sm:w-2.5 h-2.5 rounded-full border border-white/20 shadow-sm"
+                                style={{ backgroundColor: activeGrp?.color || '#3b82f6' }}
+                              />
+                              <span className="text-[9px] sm:text-[10px] font-semibold text-slate-300 max-w-[90px] sm:max-w-[120px] truncate">
+                                {activeGrp?.friendlyName || 'Brigada'}
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </div>
 
                       {/* Search filter within this color zone */}
@@ -1694,7 +1784,7 @@ export default function App() {
                       {/* Scrollable List of Sections */}
                       <div className="max-h-36 sm:max-h-52 overflow-y-auto divide-y divide-slate-800/40 custom-scrollbar pr-0.5">
                         {(() => {
-                          const currentGroup = colorGroups.find(g => g.color === selectedColorGroup);
+                          const currentGroup = colorGroups.find(g => g.key === selectedColorGroup || g.color === selectedColorGroup);
                           if (!currentGroup) return null;
 
                           const matchedFeatures = currentGroup.features.filter(f => {
@@ -2060,6 +2150,164 @@ export default function App() {
           )}
         </main>
       </div>
+
+      {/* MODAL: Assign Uploaded KML to District & Brigade */}
+      {uploadModalOpen && (
+        <div className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-[#0f172a] border border-[#1e293b] rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl text-slate-100">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-2">
+                <Upload className="w-5 h-5 text-blue-400" />
+                <h3 className="font-bold text-sm">Vincular Archivo KML</h3>
+              </div>
+              <button 
+                onClick={() => setUploadModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl space-y-1">
+              <p className="text-[10px] uppercase font-bold text-slate-500">Archivo detectado:</p>
+              <p className="text-xs font-bold text-blue-300 truncate">{pendingFileName}</p>
+            </div>
+
+            {/* Select Target District */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-300">1. Selecciona el Distrito Destino:</label>
+              <div className="grid grid-cols-2 gap-2">
+                {districts.map(dist => (
+                  <button
+                    key={dist.id}
+                    onClick={() => setTargetDistrictId(dist.id)}
+                    className={`p-2.5 rounded-xl border text-xs text-left font-bold transition flex items-center space-x-2 cursor-pointer ${
+                      targetDistrictId === dist.id 
+                        ? 'bg-blue-600/20 border-blue-500 text-white' 
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: dist.color }}></span>
+                    <span>{dist.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Select Brigade */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-300">2. Asignar a Brigada:</label>
+              <div className="grid grid-cols-3 gap-1.5">
+                {['Brigada 1', 'Brigada 2', 'Brigada 3', 'Brigada 4', 'Brigada 5', 'General'].map(bName => (
+                  <button
+                    key={bName}
+                    onClick={() => {
+                      setTargetBrigade(bName);
+                      setCustomBrigadeInput('');
+                    }}
+                    className={`py-2 px-2 rounded-lg border text-[10px] font-bold transition text-center cursor-pointer ${
+                      targetBrigade === bName && !customBrigadeInput 
+                        ? 'bg-blue-600 text-white border-blue-500' 
+                        : 'bg-slate-950 text-slate-400 border-slate-850 hover:text-slate-200'
+                    }`}
+                  >
+                    {bName}
+                  </button>
+                ))}
+              </div>
+
+              <div className="pt-1">
+                <input
+                  type="text"
+                  placeholder="O escribe otra Brigada (ej. Brigada Especial)..."
+                  value={customBrigadeInput}
+                  onChange={(e) => setCustomBrigadeInput(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-200 outline-none focus:border-blue-500"
+                />
+              </div>
+            </div>
+
+            <div className="pt-2 flex items-center justify-end space-x-2 border-t border-slate-800">
+              <button
+                onClick={() => setUploadModalOpen(false)}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-semibold rounded-xl transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmKmlUpload}
+                className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl transition flex items-center space-x-1.5 cursor-pointer"
+              >
+                <Check className="w-4 h-4" />
+                <span>Confirmar e Importar</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Create New District */}
+      {newDistrictModalOpen && (
+        <div className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-[#0f172a] border border-[#1e293b] rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-2xl text-slate-100">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-2">
+                <Plus className="w-5 h-5 text-purple-400" />
+                <h3 className="font-bold text-sm">Agregar Nuevo Distrito</h3>
+              </div>
+              <button 
+                onClick={() => setNewDistrictModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-300">Nombre del Distrito:</label>
+                <input
+                  type="text"
+                  placeholder="ej. Distrito 11, Distrito 12..."
+                  value={newDistrictNameInput}
+                  onChange={(e) => setNewDistrictNameInput(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 outline-none focus:border-purple-500"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-300">Color Distintivo:</label>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="color"
+                    value={newDistrictColorInput}
+                    onChange={(e) => setNewDistrictColorInput(e.target.value)}
+                    className="w-8 h-8 rounded border-0 bg-transparent cursor-pointer"
+                  />
+                  <span className="text-xs font-mono text-slate-400">{newDistrictColorInput}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2 flex items-center justify-end space-x-2 border-t border-slate-800">
+              <button
+                onClick={() => setNewDistrictModalOpen(false)}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-semibold rounded-xl transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleCreateDistrict}
+                disabled={!newDistrictNameInput.trim()}
+                className="px-5 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white text-xs font-bold rounded-xl transition flex items-center space-x-1.5 cursor-pointer"
+              >
+                <Check className="w-4 h-4" />
+                <span>Crear Distrito</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

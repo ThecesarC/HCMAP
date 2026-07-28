@@ -43,3 +43,31 @@ export interface SampleKml {
   zoom: number;
   content: string;
 }
+
+export interface DistrictKmlFile {
+  id: string;
+  name: string;
+  brigade: string; // e.g. "Brigada 1", "Brigada 2", "Brigada 3", "Brigada 4", "Brigada 5", "General"
+  enabled: boolean;
+  kmlText: string;
+  kmlDoc: KmlDocument;
+  uploadedAt: string;
+}
+
+export interface District {
+  id: string;
+  name: string; // e.g. "Distrito 8", "Distrito 11"
+  description?: string;
+  enabled: boolean;
+  color: string; // e.g. "#3b82f6" for District 8, "#10b981" for District 11
+  kmlFiles: DistrictKmlFile[];
+}
+
+export interface DistrictFeature extends KmlFeature {
+  districtId: string;
+  districtName: string;
+  districtColor: string;
+  brigadeName: string;
+  fileId: string;
+  fileName: string;
+}

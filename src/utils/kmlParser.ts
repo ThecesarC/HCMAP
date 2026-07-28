@@ -62,6 +62,22 @@ function parseCoordinates(coordString: string): google.maps.LatLngLiteral[] {
 }
 
 /**
+ * Helper to get elements by tag name safely across standard XML and namespaced KML tags
+ */
+function getTagList(parent: Element | Document, tagName: string): Element[] {
+  const list = parent.getElementsByTagName(tagName);
+  if (list && list.length > 0) return Array.from(list);
+  const nsList = parent.getElementsByTagNameNS('*', tagName);
+  if (nsList && nsList.length > 0) return Array.from(nsList);
+  return [];
+}
+
+function getFirstTag(parent: Element | Document, tagName: string): Element | null {
+  const list = getTagList(parent, tagName);
+  return list.length > 0 ? list[0] : null;
+}
+
+/**
  * Parses KML XML text into a KmlDocument representation.
  */
 export function parseKml(kmlText: string): KmlDocument {
@@ -70,14 +86,14 @@ export function parseKml(kmlText: string): KmlDocument {
 
   // Parse Document or Folder Name
   let docName = 'Archivo KML';
-  const nameEl = xmlDoc.getElementsByTagName('name')[0];
-  if (nameEl && nameEl.parentNode === xmlDoc.documentElement || (nameEl && nameEl.parentNode?.nodeName === 'Document')) {
-    docName = nameEl.textContent || 'Archivo KML';
+  const nameEl = getFirstTag(xmlDoc, 'name');
+  if (nameEl) {
+    docName = nameEl.textContent?.trim() || 'Archivo KML';
   }
 
   // 1. Parse Styles
   const styles: Record<string, KmlStyle> = {};
-  const styleElements = xmlDoc.getElementsByTagName('Style');
+  const styleElements = getTagList(xmlDoc, 'Style');
   for (let i = 0; i < styleElements.length; i++) {
     const styleEl = styleElements[i];
     const id = styleEl.getAttribute('id');
@@ -86,9 +102,9 @@ export function parseKml(kmlText: string): KmlDocument {
     const styleData: KmlStyle = {};
 
     // PolyStyle
-    const polyStyle = styleEl.getElementsByTagName('PolyStyle')[0];
+    const polyStyle = getFirstTag(styleEl, 'PolyStyle');
     if (polyStyle) {
-      const colorEl = polyStyle.getElementsByTagName('color')[0];
+      const colorEl = getFirstTag(polyStyle, 'color');
       if (colorEl) {
         const { color, opacity } = kmlColorToCss(colorEl.textContent || '');
         styleData.fillColor = color;
@@ -97,14 +113,14 @@ export function parseKml(kmlText: string): KmlDocument {
     }
 
     // LineStyle
-    const lineStyle = styleEl.getElementsByTagName('LineStyle')[0];
+    const lineStyle = getFirstTag(styleEl, 'LineStyle');
     if (lineStyle) {
-      const colorEl = lineStyle.getElementsByTagName('color')[0];
+      const colorEl = getFirstTag(lineStyle, 'color');
       if (colorEl) {
         const { color } = kmlColorToCss(colorEl.textContent || '');
         styleData.strokeColor = color;
       }
-      const widthEl = lineStyle.getElementsByTagName('width')[0];
+      const widthEl = getFirstTag(lineStyle, 'width');
       if (widthEl) {
         styleData.strokeWidth = parseFloat(widthEl.textContent || '2');
       }
@@ -115,20 +131,25 @@ export function parseKml(kmlText: string): KmlDocument {
 
   // 2. Parse Placemarks
   const features: KmlFeature[] = [];
-  const placemarks = xmlDoc.getElementsByTagName('Placemark');
+  const placemarks = getTagList(xmlDoc, 'Placemark');
+  const uniqueDocPrefix = `kml-${Math.random().toString(36).substring(2, 8)}`;
 
   for (let i = 0; i < placemarks.length; i++) {
     const placemark = placemarks[i];
-    const id = placemark.getAttribute('id') || `placemark-${i}`;
-    const name = placemark.getElementsByTagName('name')[0]?.textContent?.trim() || `Área ${i + 1}`;
-    const description = placemark.getElementsByTagName('description')[0]?.textContent?.trim() || '';
-    const styleUrl = placemark.getElementsByTagName('styleUrl')[0]?.textContent?.trim() || '';
+    const rawId = placemark.getAttribute('id');
+    const id = rawId ? `${uniqueDocPrefix}-${rawId}-${i}` : `${uniqueDocPrefix}-pm-${i}`;
+    const nameEl = getFirstTag(placemark, 'name');
+    const name = nameEl?.textContent?.trim() || `Elemento ${i + 1}`;
+    const descEl = getFirstTag(placemark, 'description');
+    const description = descEl?.textContent?.trim() || '';
+    const styleUrlEl = getFirstTag(placemark, 'styleUrl');
+    const styleUrl = styleUrlEl?.textContent?.trim() || '';
 
     // Extract properties (ExtendedData, Custom Data, SchemaData)
     const properties: Record<string, string> = {};
 
     // SimpleData elements
-    const simpleDatas = placemark.getElementsByTagName('SimpleData');
+    const simpleDatas = getTagList(placemark, 'SimpleData');
     for (let s = 0; s < simpleDatas.length; s++) {
       const sData = simpleDatas[s];
       const propName = sData.getAttribute('name');
@@ -138,12 +159,12 @@ export function parseKml(kmlText: string): KmlDocument {
     }
 
     // Data elements
-    const datas = placemark.getElementsByTagName('Data');
+    const datas = getTagList(placemark, 'Data');
     for (let d = 0; d < datas.length; d++) {
       const dataEl = datas[d];
       const propName = dataEl.getAttribute('name');
       if (propName) {
-        const valEl = dataEl.getElementsByTagName('value')[0];
+        const valEl = getFirstTag(dataEl, 'value');
         if (valEl) {
           properties[propName] = valEl.textContent?.trim() || '';
         } else {
@@ -154,7 +175,7 @@ export function parseKml(kmlText: string): KmlDocument {
     }
 
     // Direct children of ExtendedData that are custom XML tags
-    const extendedDatas = placemark.getElementsByTagName('ExtendedData');
+    const extendedDatas = getTagList(placemark, 'ExtendedData');
     for (let ex = 0; ex < extendedDatas.length; ex++) {
       const extEl = extendedDatas[ex];
       const children = extEl.children;
@@ -173,15 +194,16 @@ export function parseKml(kmlText: string): KmlDocument {
     const featurePoints: google.maps.LatLngLiteral[] = [];
 
     // Parse Polygons
-    const polygons = placemark.getElementsByTagName('Polygon');
+    const polygons = getTagList(placemark, 'Polygon');
     for (let p = 0; p < polygons.length; p++) {
       const polyEl = polygons[p];
       const polygonPaths: google.maps.LatLngLiteral[][] = [];
 
       // Outer boundary
-      const outerBoundary = polyEl.getElementsByTagName('outerBoundaryIs')[0];
+      const outerBoundary = getFirstTag(polyEl, 'outerBoundaryIs');
       if (outerBoundary) {
-        const coordsText = outerBoundary.getElementsByTagName('coordinates')[0]?.textContent || '';
+        const coordsEl = getFirstTag(outerBoundary, 'coordinates');
+        const coordsText = coordsEl?.textContent || '';
         const outerPath = parseCoordinates(coordsText);
         if (outerPath.length > 0) {
           polygonPaths.push(outerPath);
@@ -189,9 +211,10 @@ export function parseKml(kmlText: string): KmlDocument {
       }
 
       // Inner boundaries (holes)
-      const innerBoundaries = polyEl.getElementsByTagName('innerBoundaryIs');
+      const innerBoundaries = getTagList(polyEl, 'innerBoundaryIs');
       for (let ib = 0; ib < innerBoundaries.length; ib++) {
-        const coordsText = innerBoundaries[ib].getElementsByTagName('coordinates')[0]?.textContent || '';
+        const coordsEl = getFirstTag(innerBoundaries[ib], 'coordinates');
+        const coordsText = coordsEl?.textContent || '';
         const innerPath = parseCoordinates(coordsText);
         if (innerPath.length > 0) {
           polygonPaths.push(innerPath);
@@ -204,10 +227,11 @@ export function parseKml(kmlText: string): KmlDocument {
     }
 
     // Parse LineStrings
-    const lineStrings = placemark.getElementsByTagName('LineString');
+    const lineStrings = getTagList(placemark, 'LineString');
     for (let l = 0; l < lineStrings.length; l++) {
       const lineEl = lineStrings[l];
-      const coordsText = lineEl.getElementsByTagName('coordinates')[0]?.textContent || '';
+      const coordsEl = getFirstTag(lineEl, 'coordinates');
+      const coordsText = coordsEl?.textContent || '';
       const path = parseCoordinates(coordsText);
       if (path.length > 0) {
         featureLineStrings.push(path);
@@ -215,10 +239,11 @@ export function parseKml(kmlText: string): KmlDocument {
     }
 
     // Parse Points
-    const points = placemark.getElementsByTagName('Point');
+    const points = getTagList(placemark, 'Point');
     for (let pt = 0; pt < points.length; pt++) {
       const pointEl = points[pt];
-      const coordsText = pointEl.getElementsByTagName('coordinates')[0]?.textContent || '';
+      const coordsEl = getFirstTag(pointEl, 'coordinates');
+      const coordsText = coordsEl?.textContent || '';
       const path = parseCoordinates(coordsText);
       if (path.length > 0) {
         featurePoints.push(path[0]);
