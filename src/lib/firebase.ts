@@ -22,7 +22,7 @@ export const db = firebaseConfig.firestoreDatabaseId
  * @param kmlText KML file contents
  * @param userEmail Email of the user performing the save
  */
-export async function saveKmlToFirestore(kmlText: string, userEmail: string): Promise<void> {
+export async function saveKmlToFirestore(kmlText: string, userEmail: string, districtsData?: any): Promise<void> {
   // 1. Determine previous number of chunks to clean up excess
   let prevNumChunks = 0;
   try {
@@ -54,6 +54,20 @@ export async function saveKmlToFirestore(kmlText: string, userEmail: string): Pr
   });
   await Promise.all(chunkPromises);
 
+  // Strip kmlDoc from districtsData to prevent serialization errors before storing
+  let cleanDistrictsJson = null;
+  if (districtsData) {
+    try {
+      const sanitized = JSON.parse(JSON.stringify(districtsData, (key, value) => {
+        if (key === 'kmlDoc') return undefined; // Omit parsed XML doc, regenerate on load
+        return value;
+      }));
+      cleanDistrictsJson = JSON.stringify(sanitized);
+    } catch (e) {
+      console.warn("Could not serialize districtsData:", e);
+    }
+  }
+
   // 4. Save metadata document
   const docRef = doc(db, "kml_data", "current");
   await setDoc(docRef, {
@@ -61,6 +75,7 @@ export async function saveKmlToFirestore(kmlText: string, userEmail: string): Pr
     numChunks,
     updatedAt: new Date().toISOString(),
     updatedBy: userEmail,
+    districtsJson: cleanDistrictsJson
   });
 
   // 5. Clean up any excess old chunks if the new KML has fewer chunks
@@ -77,16 +92,30 @@ export async function saveKmlToFirestore(kmlText: string, userEmail: string): Pr
   }
 }
 
+export interface FirestoreKmlResult {
+  kmlText: string | null;
+  districtsData: any | null;
+}
+
 /**
- * Retrieves KML text from Firestore database, reconstructing it from chunks if necessary.
- * @returns KML text or null if not found
+ * Retrieves KML text and districts data from Firestore database, reconstructing it from chunks if necessary.
  */
-export async function getKmlFromFirestore(): Promise<string | null> {
+export async function getKmlFromFirestore(): Promise<FirestoreKmlResult | null> {
   try {
     const docRef = doc(db, "kml_data", "current");
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) {
       const data = docSnap.data();
+      let districtsData = null;
+      if (data.districtsJson) {
+        try {
+          districtsData = JSON.parse(data.districtsJson);
+        } catch (e) {
+          console.warn("Could not parse districtsJson from Firestore:", e);
+        }
+      }
+
+      let kmlText: string | null = null;
       if (data.isChunked) {
         const numChunks = data.numChunks || 0;
         const chunkPromises = [];
@@ -94,17 +123,19 @@ export async function getKmlFromFirestore(): Promise<string | null> {
           chunkPromises.push(getDoc(doc(db, "kml_data", `chunk_${i}`)));
         }
         const chunkSnaps = await Promise.all(chunkPromises);
-        let kmlText = "";
+        let reconstructed = "";
         for (let i = 0; i < numChunks; i++) {
           const chunkSnap = chunkSnaps[i];
           if (chunkSnap.exists()) {
-            kmlText += chunkSnap.data().text || "";
+            reconstructed += chunkSnap.data().text || "";
           }
         }
-        return kmlText || null;
+        kmlText = reconstructed || null;
       } else {
-        return data.kmlText || null;
+        kmlText = data.kmlText || null;
       }
+
+      return { kmlText, districtsData };
     }
     return null;
   } catch (error) {

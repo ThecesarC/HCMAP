@@ -25,7 +25,6 @@ import {
   Trash2, 
   Grid, 
   Database,
-  Sliders,
   Sparkles,
   FileText,
   User,
@@ -48,9 +47,57 @@ import { parseKml } from './utils/kmlParser';
 import { KmlDocument, KmlFeature, District, DistrictKmlFile, DistrictFeature } from './types';
 import { SAMPLES } from './data/samples';
 import { getKmlFromFirestore, saveKmlToFirestore } from './lib/firebase';
+import currentKmlText from './data/current.kml?raw';
 
 // Redefine Leaflet Default Icon behaviors to prevent path resolution bugs in dev servers
-// Even though we mostly use elegant vector elements (CircleMarker, Polyline, Polygon), it's good practice.
+// SafePolygon component to prevent react-leaflet Tooltip DOM removeChild unmount errors
+interface SafePolygonProps {
+  positions: L.LatLngTuple[][];
+  pathOptions: L.PathOptions;
+  eventHandlers?: any;
+  sectionVal?: string | null;
+}
+
+const SafePolygon = React.memo(function SafePolygon({
+  positions,
+  pathOptions,
+  eventHandlers,
+  sectionVal
+}: SafePolygonProps) {
+  const polygonRef = useRef<L.Polygon>(null);
+
+  useEffect(() => {
+    const poly = polygonRef.current;
+    if (!poly) return;
+
+    if (sectionVal) {
+      poly.bindTooltip(sectionVal, {
+        permanent: true,
+        direction: 'center',
+        className: 'leaflet-tooltip-own'
+      });
+    } else {
+      poly.unbindTooltip();
+    }
+
+    return () => {
+      try {
+        poly.unbindTooltip();
+      } catch (e) {
+        // Safe guard against react-leaflet DOM removeChild errors
+      }
+    };
+  }, [sectionVal]);
+
+  return (
+    <Polygon
+      ref={polygonRef}
+      positions={positions}
+      pathOptions={pathOptions}
+      eventHandlers={eventHandlers}
+    />
+  );
+});
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
@@ -334,81 +381,66 @@ const extractSeccionFromNameOrDesc = (text: string): string | null => {
 
 // Robust helper to get Seccion value from a feature properties, name, description or other attributes
 const getSeccionValue = (feature: KmlFeature): string | null => {
+  if (!feature) return null;
+  const props = feature.properties || {};
+
   // 1. Check feature.properties keys first using keys containing 'seccion' or similar
-  for (const [key, value] of Object.entries(feature.properties)) {
+  for (const [key, value] of Object.entries(props)) {
     if (isSeccionKey(key)) {
       const normVal = normalizeVal(value);
       if (normVal) return normVal;
     }
   }
 
-  // 2. Try any property value that matches one of our allowed sections exactly when normalized
-  for (const value of Object.values(feature.properties)) {
+  // 2. Check if feature.name itself is a section number (e.g. "968", "2802", "1145")
+  if (feature.name) {
+    const trimmed = feature.name.trim();
+    if (/^\d+(\.0+)?$/.test(trimmed)) {
+      return normalizeVal(trimmed);
+    }
+    const extracted = extractSeccionFromNameOrDesc(feature.name);
+    if (extracted) return extracted;
+  }
+
+  // 3. Check if feature.description has "Sección X" or "Sec X"
+  if (feature.description) {
+    const extracted = extractSeccionFromNameOrDesc(feature.description);
+    if (extracted) return extracted;
+  }
+
+  // 4. Try any property value that matches one of our allowed sections or is numeric
+  for (const value of Object.values(props)) {
     const normVal = normalizeVal(value);
-    if (ALLOWED_SECCIONES.includes(normVal)) {
+    if (normVal && ALLOWED_SECCIONES.includes(normVal)) {
       return normVal;
     }
   }
 
-  // 3. Scan feature.name for any number that is in ALLOWED_SECCIONES
-  if (feature.name) {
-    const numbers = feature.name.match(/\d+/g);
-    if (numbers) {
-      for (const num of numbers) {
-        const norm = normalizeVal(num);
-        if (ALLOWED_SECCIONES.includes(norm)) {
-          return norm;
-        }
-      }
-    }
-  }
-
-  // 4. Scan feature.description for any number that is in ALLOWED_SECCIONES
-  if (feature.description) {
-    const numbers = feature.description.match(/\d+/g);
-    if (numbers) {
-      for (const num of numbers) {
-        const norm = normalizeVal(num);
-        if (ALLOWED_SECCIONES.includes(norm)) {
-          return norm;
-        }
-      }
-    }
-  }
-
-  // 5. Scan any other property string value for numbers that are in ALLOWED_SECCIONES
-  for (const value of Object.values(feature.properties)) {
+  // 5. Scan any other property string value for numbers
+  for (const value of Object.values(props)) {
     const text = String(value);
     const numbers = text.match(/\d+/g);
     if (numbers) {
       for (const num of numbers) {
         const norm = normalizeVal(num);
-        if (ALLOWED_SECCIONES.includes(norm)) {
+        if (norm && /^\d{1,4}$/.test(norm)) {
           return norm;
         }
       }
     }
   }
-
-  // 6. Generic name or description extraction fallback
-  const fromName = extractSeccionFromNameOrDesc(feature.name);
-  if (fromName) return fromName;
-
-  const fromDesc = extractSeccionFromNameOrDesc(feature.description);
-  if (fromDesc) return fromDesc;
 
   return null;
 };
 
 // Check if feature matches Seccion filter
 const isFeatureAllowed = (feature: KmlFeature): boolean => {
-  const sec = getSeccionValue(feature);
-  if (!sec) return false;
-  return ALLOWED_SECCIONES.includes(sec);
+  return true; // Allow all sections from loaded KML files
 };
 
 // Check if feature contains "ÁREA" (case-insensitive and accent-insensitive)
 const carriesArea = (feature: KmlFeature): boolean => {
+  if (!feature) return false;
   const containsAreaWord = (str: string | null | undefined): boolean => {
     if (!str) return false;
     // Normalize string to remove accents and convert to lowercase
@@ -418,7 +450,7 @@ const carriesArea = (feature: KmlFeature): boolean => {
 
   if (containsAreaWord(feature.name)) return true;
   if (containsAreaWord(feature.description)) return true;
-  for (const val of Object.values(feature.properties)) {
+  for (const val of Object.values(feature.properties || {})) {
     if (containsAreaWord(String(val))) return true;
   }
   return false;
@@ -442,7 +474,12 @@ function getFeatureBrigadeInfo(feature: any): { key: string; name: string; color
   // 1. Check explicitly assigned brigadeName from file upload / district management (e.g. 'Brigada 1', 'Brigada 2')
   const brigadeNameStr = (feature.brigadeName || '').trim();
   const lowerB = brigadeNameStr.toLowerCase();
-  const isGeneric = !brigadeNameStr || lowerB === 'general' || lowerB.includes('brigadas 1-5') || lowerB.includes('general (b1-b4)');
+  
+  const isGeneric = !brigadeNameStr || 
+                    lowerB === 'general' || 
+                    lowerB === 'general (b1-b4)' || 
+                    lowerB.includes('brigadas 1-5') || 
+                    lowerB.includes('todas');
 
   if (!isGeneric) {
     const bNumMatch = brigadeNameStr.match(/\d+/);
@@ -469,7 +506,18 @@ function getFeatureBrigadeInfo(feature: any): { key: string; name: string; color
     return { key: `brigada-${num}`, name: `Brigada ${num}`, color: palette.fill, border: palette.border };
   }
 
-  // 3. Check hardcoded section mappings for Distrito 8 (when brigadeName is generic 'Brigadas 1-5')
+  // 3. Check if file name itself specifies a Brigade (e.g., "Brigada_2.kml", "B2.kml")
+  if (feature.fileName) {
+    const fnMatch = feature.fileName.match(/BRIGADA\s*(\d+)/i) || feature.fileName.match(/\bB(\d+)\b/i) || feature.fileName.match(/BRIGADA_(\d+)/i);
+    if (fnMatch) {
+      const num = parseInt(fnMatch[1], 10);
+      const idx = (num - 1) % PALETTE_BRIGADAS.length;
+      const palette = PALETTE_BRIGADAS[Math.max(0, idx)];
+      return { key: `brigada-${num}`, name: `Brigada ${num}`, color: palette.fill, border: palette.border };
+    }
+  }
+
+  // 4. Default section mappings for sample Distrito 8
   const secVal = getSeccionValue(feature);
   if (secVal) {
     if (['1145', '1148', '1149', '1151', '1152', '1153', '1161', '2810', '2811', '2814', '2815', '2776', '1047'].includes(secVal)) {
@@ -489,15 +537,7 @@ function getFeatureBrigadeInfo(feature: any): { key: string; name: string; color
     }
   }
 
-  // 4. Fallback: Group by KML file name if available, or default to Brigada 1
-  if (feature.fileName) {
-    const cleanFileName = feature.fileName.replace(/\.kml$/i, '');
-    let hash = 0;
-    for (let i = 0; i < cleanFileName.length; i++) hash += cleanFileName.charCodeAt(i);
-    const palette = PALETTE_BRIGADAS[Math.abs(hash) % PALETTE_BRIGADAS.length];
-    return { key: `file-${cleanFileName}`, name: cleanFileName, color: palette.fill, border: palette.border };
-  }
-
+  // Fallback: Default cleanly to Brigada 1
   return { key: 'brigada-1', name: 'Brigada 1', color: PALETTE_BRIGADAS[0].fill, border: PALETTE_BRIGADAS[0].border };
 }
 
@@ -516,7 +556,8 @@ export default function App() {
       try {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+          const filtered = parsed.filter((d: any) => d.id !== 'distrito-8' && !d.name.includes('Distrito 8'));
+          if (filtered.length > 0) return filtered;
         }
       } catch (e) {
         console.warn("Could not parse saved districts_data_v2:", e);
@@ -524,19 +565,11 @@ export default function App() {
     }
     return [
       {
-        id: 'distrito-8',
-        name: 'Distrito 8',
-        description: 'Polígonos y secciones electorales del Distrito 8',
-        enabled: true,
-        color: '#3b82f6', // Blue theme
-        kmlFiles: []
-      },
-      {
         id: 'distrito-11',
         name: 'Distrito 11',
         description: 'Polígonos y capas correspondientes al Distrito 11',
         enabled: true,
-        color: '#10b981', // Emerald green theme
+        color: '#16a34a', // Emerald green theme
         kmlFiles: []
       }
     ];
@@ -550,7 +583,7 @@ export default function App() {
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [pendingKmlText, setPendingKmlText] = useState<string | null>(null);
   const [pendingFileName, setPendingFileName] = useState<string>('Poligono.kml');
-  const [targetDistrictId, setTargetDistrictId] = useState<string>('distrito-8');
+  const [targetDistrictId, setTargetDistrictId] = useState<string>('distrito-11');
   const [targetBrigade, setTargetBrigade] = useState<string>('Brigada 1');
   const [customBrigadeInput, setCustomBrigadeInput] = useState<string>('');
 
@@ -624,7 +657,7 @@ export default function App() {
     fileName: string, 
     districtId: string, 
     brigadeName: string
-  ) => {
+  ): { success: boolean; updatedDistricts?: District[] } => {
     try {
       const parsed = parseKml(kmlText);
       setKmlDoc(parsed);
@@ -639,137 +672,193 @@ export default function App() {
         uploadedAt: new Date().toLocaleDateString('es-MX')
       };
 
-      setDistricts(prev => prev.map(dist => {
-        if (dist.id === districtId) {
-          // Check if file with same name already exists to avoid duplicate entries
-          const existing = dist.kmlFiles.filter(f => f.name !== newFile.name);
-          return {
-            ...dist,
-            enabled: true, // Auto-activate district on upload
-            kmlFiles: [...existing, newFile]
-          };
-        }
-        return dist;
-      }));
+      let newDistrictsList: District[] = [];
+
+      setDistricts(prev => {
+        newDistrictsList = prev.map(dist => {
+          if (dist.id === districtId) {
+            // Check if file with same name already exists to avoid duplicate entries
+            const existing = dist.kmlFiles.filter(f => f.name !== newFile.name);
+            return {
+              ...dist,
+              enabled: true, // Auto-activate district on upload
+              kmlFiles: [...existing, newFile]
+            };
+          }
+          return dist;
+        });
+        return newDistrictsList;
+      });
 
       // Trigger map bounds fit
       setTimeout(() => {
         setFitAllTrigger(prev => prev + 1);
       }, 150);
 
-      return true;
+      return { success: true, updatedDistricts: newDistrictsList };
     } catch (err) {
       console.error("Error attaching KML to district:", err);
       setErrorMsg("Error al procesar el archivo KML. Verifica que el archivo XML sea válido.");
-      return false;
+      return { success: false };
     }
   };
 
-  // Load default sample or persisted KML on mount into Distrito 8
+  // Load default sample or persisted KML on mount into Districts
   useEffect(() => {
     const initKml = async () => {
-      let kmlTextToLoad: string | null = null;
+      let serverKml: string | null = null;
 
-      // 1. Try Firestore first
+      // 1. Fetch official KML from server (/api/kml = src/data/current.kml)
       try {
-        console.log("Intentando cargar KML desde Firebase Firestore...");
-        const firestoreKml = await getKmlFromFirestore();
-        if (firestoreKml && !isFakeKml(firestoreKml)) {
-          console.log("¡Cargado KML exitosamente desde Firestore!");
-          kmlTextToLoad = firestoreKml;
+        const res = await fetch('/api/kml');
+        const data = await res.json();
+        if (data.success && data.kml && !isFakeKml(data.kml)) {
+          serverKml = data.kml;
+        }
+      } catch (err) {
+        console.warn("Error fetching KML from local API server:", err);
+      }
+
+      let canonicalD11File: DistrictKmlFile | null = null;
+      try {
+        const kmlText = serverKml || currentKmlText;
+        if (kmlText) {
+          const parsed = parseKml(kmlText);
+          canonicalD11File = {
+            id: 'd11-brigada1-kml',
+            name: 'BRIGADA 1 DT11.kml',
+            brigade: 'Brigada 1',
+            enabled: true,
+            kmlText: kmlText,
+            kmlDoc: parsed,
+            uploadedAt: new Date().toLocaleDateString('es-MX')
+          };
+        }
+      } catch (e) {
+        console.error("Error parsing Brigada 1 KML:", e);
+      }
+
+      // 2. Try loading persisted data from Firestore
+      let firestoreResult: { kmlText: string | null; districtsData: any | null } | null = null;
+      try {
+        console.log("Intentando cargar KML y Distritos desde Firebase Firestore...");
+        const res = await getKmlFromFirestore();
+        if (res) {
+          firestoreResult = res;
         }
       } catch (fErr: any) {
-        console.warn("No se pudo conectar a Firestore (o no existe documento aún):", fErr);
+        console.warn("No se pudo conectar a Firestore:", fErr);
         checkFirestoreQuotaError(fErr);
       }
 
-      // 2. Try Node Express backend API fallback if not found in Firestore
-      if (!kmlTextToLoad) {
+      let finalDistricts: District[] = [
+        {
+          id: 'distrito-11',
+          name: 'Distrito 11',
+          description: 'Polígonos y capas correspondientes al Distrito 11',
+          enabled: true,
+          color: '#16a34a',
+          kmlFiles: canonicalD11File ? [canonicalD11File] : []
+        }
+      ];
+
+      if (firestoreResult?.districtsData && Array.isArray(firestoreResult.districtsData) && firestoreResult.districtsData.length > 0) {
         try {
-          console.log("Intentando cargar KML desde el servidor API local...");
-          const res = await fetch('/api/kml');
-          const data = await res.json();
-          if (data.success && data.kml && !isFakeKml(data.kml)) {
-            console.log("Cargando KML permanente desde el servidor local");
-            kmlTextToLoad = data.kml;
-          }
-        } catch (err) {
-          console.warn("Error fetching KML from local API server:", err);
-        }
-      }
+          const restoredDistricts: District[] = firestoreResult.districtsData
+            .filter((d: any) => d.id !== 'distrito-8' && d.name !== 'Distrito 8')
+            .map((d: any) => ({
+              ...d,
+              kmlFiles: (d.kmlFiles || []).map((f: any) => {
+                if (f.kmlText) {
+                  try {
+                    const parsed = parseKml(f.kmlText);
+                    return { ...f, kmlDoc: parsed };
+                  } catch (e) {
+                    console.error("Error parsing restored file:", f.name, e);
+                    return null;
+                  }
+                }
+                return f;
+              }).filter((f: any) => f && f.kmlDoc && Array.isArray(f.kmlDoc.features))
+            }));
 
-      // 3. Try LocalStorage fallback
-      if (!kmlTextToLoad) {
-        const savedKml = localStorage.getItem('persisted_kml_content');
-        if (savedKml && !isFakeKml(savedKml)) {
-          console.log("Cargando KML guardado en localStorage...");
-          kmlTextToLoad = savedKml;
-        }
-      }
-
-      // 4. Default to sample KML if no file stored
-      if (!kmlTextToLoad && SAMPLES && SAMPLES.length > 0) {
-        kmlTextToLoad = SAMPLES[0].content;
-      }
-
-      // Attach to Distrito 8 if Distrito 8 currently has no files
-      if (kmlTextToLoad) {
-        setDistricts(prev => {
-          const d8 = prev.find(d => d.id === 'distrito-8');
-          if (d8 && d8.kmlFiles.length === 0) {
-            try {
-              const parsed = parseKml(kmlTextToLoad!);
-              setKmlDoc(parsed);
-              const defaultFile: DistrictKmlFile = {
-                id: 'd8-initial-kml',
-                name: 'Secciones_Distrito_8.kml',
-                brigade: 'Brigadas 1-5',
+          // Ensure Distrito 11 includes canonical BRIGADA 1 if missing, while preserving all existing files and brigadas
+          const d11Index = restoredDistricts.findIndex(d => d.id === 'distrito-11');
+          if (canonicalD11File) {
+            if (d11Index >= 0) {
+              const d11 = restoredDistricts[d11Index];
+              const existingFiles = d11.kmlFiles || [];
+              const hasCanonical = existingFiles.some((f: any) => f.name === canonicalD11File!.name || f.id === canonicalD11File!.id);
+              if (existingFiles.length === 0) {
+                restoredDistricts[d11Index] = {
+                  ...d11,
+                  enabled: true,
+                  kmlFiles: [canonicalD11File]
+                };
+              } else if (!hasCanonical) {
+                restoredDistricts[d11Index] = {
+                  ...d11,
+                  enabled: true,
+                  kmlFiles: [canonicalD11File, ...existingFiles]
+                };
+              }
+            } else {
+              restoredDistricts.push({
+                id: 'distrito-11',
+                name: 'Distrito 11',
+                description: 'Polígonos y capas correspondientes al Distrito 11',
                 enabled: true,
-                kmlText: kmlTextToLoad!,
-                kmlDoc: parsed,
-                uploadedAt: new Date().toLocaleDateString('es-MX')
-              };
-              return prev.map(d => d.id === 'distrito-8' ? { ...d, kmlFiles: [defaultFile] } : d);
-            } catch (e) {
-              console.error("Error parsing default KML into Distrito 8:", e);
+                color: '#16a34a',
+                kmlFiles: [canonicalD11File]
+              });
             }
           }
-          return prev;
-        });
 
-        // Trigger map bounds
-        setTimeout(() => {
-          setFitAllTrigger(prev => prev + 1);
-        }, 200);
+          if (restoredDistricts.some(d => d.kmlFiles && d.kmlFiles.length > 0)) {
+            finalDistricts = restoredDistricts;
+            console.log("¡Distritos y Brigadas restaurados exitosamente desde Firestore!");
+          }
+        } catch (rErr) {
+          console.error("Error restoring districts structure:", rErr);
+        }
       }
+
+      setDistricts(finalDistricts);
+
+      setTimeout(() => {
+        setFitAllTrigger(prev => prev + 1);
+      }, 200);
     };
 
     initKml();
   }, []);
 
   const saveKmlToServer = async () => {
-    if (!kmlDoc) return;
     setIsSavingToServer(true);
     setServerSaveMessage(null);
     try {
-      const kmlText = localStorage.getItem('persisted_kml_content');
-      if (!kmlText) {
-        setServerSaveMessage({ type: 'error', text: 'No se encontró el texto KML en caché local para guardar.' });
-        setIsSavingToServer(false);
-        return;
-      }
+      // Gather all active KML texts across districts
+      const allKmlTexts: string[] = [];
+      districts.forEach(d => {
+        d.kmlFiles.forEach(f => {
+          if (f.kmlText) allKmlTexts.push(f.kmlText);
+        });
+      });
 
-      // 1. Save to Firebase Firestore (Primary)
+      const fallbackKml = localStorage.getItem('persisted_kml_content') || '';
+      const mainKmlText = allKmlTexts.length > 0 ? allKmlTexts.join('\n\n') : fallbackKml;
+
+      // 1. Save to Firebase Firestore (Primary, saving full districts structure)
       let firestoreSuccess = false;
       try {
-        await saveKmlToFirestore(kmlText, currentUser?.email || 'admin');
+        await saveKmlToFirestore(mainKmlText, currentUser?.email || 'admin', districts);
         firestoreSuccess = true;
       } catch (fErr: any) {
         console.error("Error saving to Firestore:", fErr);
         checkFirestoreQuotaError(fErr);
       }
 
-      // 2. Save to Express server (as fallback/dual-write if server is active)
+      // 2. Save to Express server (fallback)
       let serverSuccess = false;
       try {
         const res = await fetch('/api/kml', {
@@ -777,20 +866,20 @@ export default function App() {
           headers: {
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ kmlText })
+          body: JSON.stringify({ kmlText: mainKmlText })
         });
         const data = await res.json();
         if (data.success) {
           serverSuccess = true;
         }
       } catch (sErr) {
-        console.warn("Express server save skipped or failed (common on static Hosting):", sErr);
+        console.warn("Express server save skipped or failed:", sErr);
       }
 
       if (firestoreSuccess) {
         setServerSaveMessage({ 
           type: 'success', 
-          text: '¡Guardado permanentemente en la Base de Datos de Firebase!' 
+          text: '¡Guardado permanentemente en Firebase! Todos los Distritos y Brigadas están publicados.' 
         });
       } else if (serverSuccess) {
         setServerSaveMessage({ 
@@ -807,7 +896,6 @@ export default function App() {
       setServerSaveMessage({ type: 'error', text: 'Error de red al intentar guardar.' });
     } finally {
       setIsSavingToServer(false);
-      // Auto-clear message after 6 seconds
       setTimeout(() => {
         setServerSaveMessage(null);
       }, 6000);
@@ -845,7 +933,7 @@ export default function App() {
       if (!district.enabled) return;
 
       district.kmlFiles.forEach(file => {
-        if (!file.enabled) return;
+        if (!file.enabled || !file.kmlDoc || !Array.isArray(file.kmlDoc.features)) return;
 
         file.kmlDoc.features.forEach(feat => {
           // If filterSeccionesActive is explicitly turned ON, restrict section filter to Distrito 8
@@ -943,20 +1031,30 @@ export default function App() {
     if (!pendingKmlText) return;
     const finalBrigade = customBrigadeInput.trim() || targetBrigade || 'Brigada 1';
     
-    const success = attachKmlToDistrict(
+    const result = attachKmlToDistrict(
       pendingKmlText,
       pendingFileName,
       targetDistrictId,
       finalBrigade
     );
 
-    if (success) {
+    if (result.success && result.updatedDistricts) {
       setUploadModalOpen(false);
       setPendingKmlText(null);
       setCustomBrigadeInput('');
 
+      // Gather all active KML texts across districts to build a complete combined text
+      const allKmlTexts: string[] = [];
+      result.updatedDistricts.forEach(d => {
+        d.kmlFiles.forEach(f => {
+          if (f.kmlText) allKmlTexts.push(f.kmlText);
+        });
+      });
+      const combinedText = allKmlTexts.length > 0 ? allKmlTexts.join('\n\n') : pendingKmlText;
+
       try {
-        await saveKmlToFirestore(pendingKmlText, currentUser?.email || 'bunkerhrv@gmail.com');
+        await saveKmlToFirestore(combinedText, currentUser?.email || 'bunkerhrv@gmail.com', result.updatedDistricts);
+        console.log("¡KML y estructura de Distritos guardados exitosamente en Firestore!");
       } catch (err) {
         console.warn("Auto-sync to Firestore skipped/limited:", err);
       }
@@ -965,10 +1063,11 @@ export default function App() {
 
   // Extract all unique ExtendedData keys from active features to allow categorization
   const getExtendedDataKeys = (): string[] => {
-    if (!kmlDoc) return [];
     const keysSet = new Set<string>();
     activeFeatures.forEach(f => {
-      Object.keys(f.properties).forEach(k => keysSet.add(k));
+      if (f && f.properties) {
+        Object.keys(f.properties).forEach(k => keysSet.add(k));
+      }
     });
     return Array.from(keysSet);
   };
@@ -977,10 +1076,10 @@ export default function App() {
 
   // If coloring by property is selected, find all unique values of that property to generate hues
   const getUniquePropertyValues = (propKey: string): string[] => {
-    if (!kmlDoc || !propKey) return [];
+    if (!propKey) return [];
     const valuesSet = new Set<string>();
     activeFeatures.forEach(f => {
-      if (f.properties[propKey]) {
+      if (f && f.properties && f.properties[propKey]) {
         valuesSet.add(f.properties[propKey]);
       }
     });
@@ -991,10 +1090,13 @@ export default function App() {
 
   // Get style configs for Leaflet vectors based on active color modes
   const getFeatureStyle = (feature: KmlFeature) => {
+    if (!feature) {
+      return { fillColor: '#16a34a', fillOpacity: 0.45, color: '#15803d', weight: 2.5 };
+    }
     const isSelected = selectedFeature?.id === feature.id;
 
     if (coloringMode === 'random') {
-      const color = randomColors[feature.id] || '#3b82f6';
+      const color = (randomColors && randomColors[feature.id]) || '#3b82f6';
       return {
         fillColor: color,
         fillOpacity: isSelected ? 0.65 : 0.35,
@@ -1004,7 +1106,7 @@ export default function App() {
     }
 
     if (coloringMode === 'property' && colorByProperty) {
-      const val = feature.properties[colorByProperty];
+      const val = feature.properties ? feature.properties[colorByProperty] : null;
       if (!val) {
         return {
           fillColor: '#475569',
@@ -1046,6 +1148,7 @@ export default function App() {
     const groups: Record<string, { key: string; color: string; friendlyName: string; features: KmlFeature[] }> = {};
     
     activeFeatures.forEach(f => {
+      if (!f) return;
       const bInfo = getFeatureBrigadeInfo(f);
       const style = getFeatureStyle(f);
       
@@ -1146,11 +1249,16 @@ export default function App() {
 
   // Filter features based on search query
   const filteredFeatures = activeFeatures.filter(f => {
-    const query = searchQuery.toLowerCase();
-    const matchesName = f.name.toLowerCase().includes(query);
-    const matchesDesc = f.description.toLowerCase().includes(query);
-    const matchesProps = Object.entries(f.properties).some(([k, v]) => 
-      k.toLowerCase().includes(query) || String(v).toLowerCase().includes(query)
+    if (!f) return false;
+    const query = (searchQuery || '').trim().toLowerCase();
+    if (!query) return true;
+    const nameStr = (f.name || '').toLowerCase();
+    const descStr = (f.description || '').toLowerCase();
+    const matchesName = nameStr.includes(query);
+    const matchesDesc = descStr.includes(query);
+    const props = f.properties || {};
+    const matchesProps = Object.entries(props).some(([k, v]) => 
+      (k || '').toLowerCase().includes(query) || String(v || '').toLowerCase().includes(query)
     );
     return matchesName || matchesDesc || matchesProps;
   });
@@ -1588,39 +1696,10 @@ export default function App() {
                 })}
               </div>
 
-              {/* General Filters & Tools Section */}
-              <div className="bg-[#1e293b]/40 border border-[#334155]/60 rounded-xl p-3 space-y-3">
-                <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
-                  <div className="flex items-center space-x-1.5">
-                    <Sliders className="w-3.5 h-3.5 text-blue-400" />
-                    <span>Filtros y Estilos</span>
-                  </div>
-                  <span className="text-[10px] bg-blue-950 text-blue-400 px-2 py-0.5 rounded font-mono font-bold">
-                    {activeFeatures.length} activos
-                  </span>
-                </div>
-
-                {/* 30 Secciones Filter Toggle */}
-                <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
-                  <div>
-                    <span className="text-[11px] font-bold text-slate-300 block">Filtro 30 Secciones</span>
-                    <span className="text-[9px] text-slate-500 block">Mantiene únicamente las 30 secciones autorizadas</span>
-                  </div>
-                  <button
-                    onClick={() => setFilterSeccionesActive(!filterSeccionesActive)}
-                    className={`text-[10px] font-bold px-2.5 py-1 rounded-md border transition-all cursor-pointer ${
-                      filterSeccionesActive 
-                        ? 'bg-blue-600/20 text-blue-400 border-blue-500/30' 
-                        : 'bg-slate-950 text-slate-500 border-slate-850'
-                    }`}
-                  >
-                    {filterSeccionesActive ? 'ACTIVO' : 'DESACTIVADO'}
-                  </button>
-                </div>
-
-                {/* Search Bar */}
-                <div className="relative pt-1">
-                  <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-slate-500" />
+              {/* Search Bar */}
+              <div className="bg-[#1e293b]/40 border border-[#334155]/60 rounded-xl p-3">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-500" />
                   <input
                     type="text"
                     placeholder="Buscar sección, área o brigada..."
@@ -1932,7 +2011,8 @@ export default function App() {
               />
 
               {/* Render vector features */}
-              {filteredFeatures.map(f => {
+              {filteredFeatures.flatMap(f => {
+                if (!f) return [];
                 const style = getFeatureStyle(f);
                 const sectionVal = getSeccionValue(f);
 
@@ -1945,7 +2025,7 @@ export default function App() {
                     );
 
                     return (
-                      <Polygon
+                      <SafePolygon
                         key={`${f.id}-poly-${pIdx}`}
                         positions={leafletPaths}
                         pathOptions={{
@@ -1960,17 +2040,8 @@ export default function App() {
                             setIsDetailsCollapsed(false);
                           }
                         }}
-                      >
-                        {sectionVal && (
-                          <Tooltip 
-                            permanent={true} 
-                            direction="center" 
-                            className="leaflet-tooltip-own"
-                          >
-                            {sectionVal}
-                          </Tooltip>
-                        )}
-                      </Polygon>
+                        sectionVal={sectionVal}
+                      />
                     );
                   });
                 }
@@ -2021,7 +2092,7 @@ export default function App() {
                   ));
                 }
 
-                return null;
+                return [];
               })}
             </MapContainer>
           </div>
