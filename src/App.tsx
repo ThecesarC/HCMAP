@@ -239,85 +239,23 @@ function MapController({
   selectedFeature, 
   fitBoundsTrigger,
   allFeatures,
-  fitAllTrigger,
-  isDetailsCollapsed
+  fitAllTrigger
 }: { 
   selectedFeature: KmlFeature | null; 
   fitBoundsTrigger: number;
   allFeatures: KmlFeature[];
   fitAllTrigger: number;
-  isDetailsCollapsed: boolean;
 }) {
   const map = useMap();
-  const prevSelectedIdRef = useRef<string | null>(null);
-  const prevTriggerRef = useRef<number>(0);
 
   // Fit bounds to a single selected feature
   useEffect(() => {
     if (!map || !selectedFeature) return;
     const bounds = getFeatureBounds(selectedFeature);
     if (bounds) {
-      const prevSelectedId = prevSelectedIdRef.current;
-      const prevTrigger = prevTriggerRef.current;
-
-      prevSelectedIdRef.current = selectedFeature.id;
-      prevTriggerRef.current = fitBoundsTrigger;
-
-      const isNewSelection = selectedFeature.id !== prevSelectedId;
-      const isExplicitTrigger = fitBoundsTrigger !== prevTrigger;
-
-      // Calculate standard zoom level where the entire feature fits nicely
-      const boundsZoom = map.getBoundsZoom(bounds, false, L.point(50, 50));
-      const fitZoom = Math.min(boundsZoom, 16);
-
-      // Determine target zoom:
-      // If it's a new selection or an explicit fitBounds click, use the fit zoom.
-      // Otherwise, preserve the user's current zoom level (clamped to at least fitZoom).
-      let targetZoom = map.getZoom();
-      if (isNewSelection || isExplicitTrigger) {
-        targetZoom = fitZoom;
-      } else {
-        targetZoom = Math.max(map.getZoom(), fitZoom);
-      }
-
-      // Calculate feature's center LatLng
-      const featureCenter = bounds.getCenter();
-
-      // Project feature center to absolute map pixels at the target zoom
-      const featurePixel = map.project(featureCenter, targetZoom);
-
-      const mapSize = map.getSize();
-      const mapWidth = mapSize.x;
-      const mapHeight = mapSize.y;
-
-      let targetPixelX = mapWidth / 2;
-      let targetPixelY = mapHeight / 2;
-
-      const isMobile = window.innerWidth < 768;
-      if (isMobile) {
-        // Mobile details panel at the bottom: height ~320px when expanded, ~64px when collapsed
-        const panelHeight = isDetailsCollapsed ? 64 : 320;
-        // Shift map center down (pushing the feature upwards on screen)
-        targetPixelY = mapHeight / 2 + panelHeight / 2;
-      } else {
-        // Desktop details panel on the bottom-right: width ~410px when expanded, ~100px when collapsed
-        const panelWidth = isDetailsCollapsed ? 100 : 410;
-        // Shift map center right (pushing the feature leftwards on screen)
-        targetPixelX = mapWidth / 2 + panelWidth / 2;
-      }
-
-      // Convert target screen center offset to absolute map pixels at target zoom
-      const targetCenterPixel = L.point(
-        featurePixel.x - (targetPixelX - mapWidth / 2),
-        featurePixel.y - (targetPixelY - mapHeight / 2)
-      );
-
-      // Unproject back to LatLng to get the adjusted map center
-      const adjustedCenter = map.unproject(targetCenterPixel, targetZoom);
-
-      map.setView(adjustedCenter, targetZoom, { animate: true });
+      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16, animate: true });
     }
-  }, [map, selectedFeature, fitBoundsTrigger, isDetailsCollapsed]);
+  }, [map, selectedFeature, fitBoundsTrigger]);
 
   // Fit bounds to all features
   useEffect(() => {
@@ -2142,7 +2080,6 @@ export default function App() {
                 fitBoundsTrigger={fitBoundsTrigger}
                 allFeatures={filteredFeatures}
                 fitAllTrigger={fitAllTrigger}
-                isDetailsCollapsed={isDetailsCollapsed}
               />
 
               {/* Render vector features */}
@@ -2172,7 +2109,7 @@ export default function App() {
                         eventHandlers={{
                           click: () => {
                             setSelectedFeature(f);
-                            setIsDetailsCollapsed(false);
+                            setFitBoundsTrigger(prev => prev + 1);
                           }
                         }}
                         sectionVal={sectionVal}
@@ -2196,7 +2133,7 @@ export default function App() {
                         eventHandlers={{
                           click: () => {
                             setSelectedFeature(f);
-                            setIsDetailsCollapsed(false);
+                            setFitBoundsTrigger(prev => prev + 1);
                           }
                         }}
                       />
@@ -2220,7 +2157,7 @@ export default function App() {
                       eventHandlers={{
                         click: () => {
                           setSelectedFeature(f);
-                          setIsDetailsCollapsed(false);
+                          setFitBoundsTrigger(prev => prev + 1);
                         }
                       }}
                     />
@@ -2231,136 +2168,6 @@ export default function App() {
               })}
             </MapContainer>
           </div>
-
-          {/* Bottom Property Overlay Details Panel */}
-          {selectedFeature && (
-            <div 
-              className={`absolute bottom-4 right-4 left-4 md:left-auto md:w-96 bg-[#0f172a]/95 border border-[#1e293b] rounded-2xl p-3 sm:p-4 shadow-2xl flex flex-col backdrop-blur-md transition-all duration-300 z-[999] overflow-hidden ${
-                isDetailsCollapsed ? 'max-h-[58px] sm:max-h-[64px] space-y-0' : 'max-h-[75%] space-y-3 sm:space-y-4'
-              }`}
-            >
-              
-              {/* Header */}
-              <div className="flex items-center justify-between">
-                <div 
-                  className="flex items-center space-x-2 sm:space-x-2.5 cursor-pointer select-none min-w-0 flex-1 pr-2 group"
-                  onClick={() => setIsDetailsCollapsed(!isDetailsCollapsed)}
-                >
-                  <span className="p-1.5 sm:p-2 bg-[#3b82f6]/10 text-[#3b82f6] border border-[#3b82f6]/20 rounded-xl flex-shrink-0 transition group-hover:bg-[#3b82f6]/20">
-                    {selectedFeature.geometryType === 'Polygon' ? <Grid className="w-3.5 h-3.5 sm:w-4 h-4" /> : <Database className="w-3.5 h-3.5 sm:w-4 h-4" />}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <h3 className="font-bold text-slate-100 text-xs sm:text-sm truncate leading-tight flex items-center gap-1 sm:gap-1.5 w-full">
-                      <span className="truncate">{selectedFeature.name}</span>
-                      <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-300 flex-shrink-0 ${isDetailsCollapsed ? '' : 'rotate-180'}`} />
-                    </h3>
-                    <p className="text-[8px] sm:text-[10px] text-slate-400 truncate leading-none mt-0.5 sm:mt-1">
-                      {isDetailsCollapsed ? 'Clic para ver características' : `Tipo de elemento: ${selectedFeature.geometryType}`}
-                    </p>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => setSelectedFeature(null)}
-                  className="text-slate-400 hover:text-white transition p-1 bg-slate-800/50 hover:bg-slate-800 rounded-lg flex-shrink-0"
-                  title="Cerrar ventana"
-                >
-                  <span className="sr-only">Cerrar</span>
-                  ✕
-                </button>
-              </div>
-
-              {!isDetailsCollapsed && (
-                <>
-                  <div className="flex-1 overflow-y-auto space-y-3 sm:space-y-4 pr-0.5 custom-scrollbar">
-                    
-                    {/* Description */}
-                    {selectedFeature.description && (
-                      <div className="p-2 sm:p-3 bg-slate-950/60 border border-slate-900 rounded-xl text-slate-300 text-[11px] sm:text-xs leading-relaxed max-h-20 sm:max-h-24 overflow-y-auto custom-scrollbar">
-                        <p className="font-bold text-[#64748b] text-[8px] sm:text-[9px] uppercase tracking-wider mb-1 flex items-center space-x-1">
-                          <Info className="w-3 h-3 text-blue-400" />
-                          <span>Descripción</span>
-                        </p>
-                        {selectedFeature.description}
-                      </div>
-                    )}
-
-                    {/* Calculated geodetic metrics */}
-                    {metrics && (
-                      <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
-                        {metrics.areaHectares && (
-                          <div className="p-2 sm:p-2.5 bg-slate-950/40 border border-slate-900 rounded-xl flex flex-col">
-                            <span className="text-[8px] sm:text-[9px] text-[#64748b] font-bold uppercase tracking-wider">Área calculada</span>
-                            <span className="text-xs sm:text-sm font-extrabold text-[#3b82f6] mt-0.5 sm:mt-1">{metrics.areaHectares} ha</span>
-                            <span className="text-[8px] sm:text-[9px] text-slate-400 font-mono mt-0.5">{metrics.areaSqKm} km²</span>
-                          </div>
-                        )}
-                        {metrics.lengthKm && (
-                          <div className="p-2 sm:p-2.5 bg-slate-950/40 border border-slate-900 rounded-xl flex flex-col">
-                            <span className="text-[8px] sm:text-[9px] text-[#64748b] font-bold uppercase tracking-wider">
-                              {selectedFeature.geometryType === 'Polygon' ? 'Perímetro' : 'Longitud'}
-                            </span>
-                            <span className="text-xs sm:text-sm font-extrabold text-[#3b82f6] mt-0.5 sm:mt-1">
-                              {parseFloat(metrics.lengthKm) < 1.0 ? `${metrics.lengthMeters} m` : `${metrics.lengthKm} km`}
-                            </span>
-                            <span className="text-[8px] sm:text-[9px] text-slate-400 font-mono mt-0.5">En metros: {metrics.lengthMeters}</span>
-                          </div>
-                        )}
-                        <div className="p-2 sm:p-2.5 bg-slate-950/40 border border-slate-900 rounded-xl flex flex-col col-span-2">
-                          <span className="text-[8px] sm:text-[9px] text-[#64748b] font-bold uppercase tracking-wider">Complejidad geométrica</span>
-                          <span className="text-[10px] sm:text-xs font-semibold text-slate-200 mt-0.5">{metrics.vertices} coordenadas geográficas</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Attribute viewer */}
-                    <div className="space-y-1.5">
-                      <p className="text-[8px] sm:text-[9px] font-bold text-[#64748b] uppercase tracking-wider flex items-center space-x-1">
-                        <Database className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-blue-400" />
-                        <span>Propiedades del KML ({Object.keys(selectedFeature.properties).length})</span>
-                      </p>
-                      {Object.keys(selectedFeature.properties).length > 0 ? (
-                        <div className="border border-slate-900 rounded-xl overflow-hidden text-[10px] sm:text-xs">
-                          <div className="max-h-36 sm:max-h-48 overflow-y-auto custom-scrollbar">
-                            <table className="w-full text-left border-collapse">
-                              <thead>
-                                <tr className="bg-slate-950/80 border-b border-slate-900">
-                                  <th className="p-1.5 sm:p-2 text-[8px] sm:text-[9px] font-bold text-[#64748b] uppercase">Clave</th>
-                                  <th className="p-1.5 sm:p-2 text-[8px] sm:text-[9px] font-bold text-[#64748b] uppercase">Valor</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-900">
-                                {Object.entries(selectedFeature.properties).map(([key, val]) => (
-                                  <tr key={key} className="hover:bg-[#1e293b]/40 transition">
-                                    <td className="p-1.5 sm:p-2 font-mono text-[9px] sm:text-[10px] text-blue-400 font-semibold break-all w-1/3">{key}</td>
-                                    <td className="p-1.5 sm:p-2 text-slate-300 break-all">{val}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="p-3 text-center border border-dashed border-slate-900 rounded-xl text-[9px] sm:text-[10px] text-slate-500">
-                          Este elemento no contiene atributos estructurados de metadatos.
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Focus action */}
-                  <div className="pt-2 border-t border-[#1e293b] flex gap-2">
-                    <button 
-                      onClick={() => setFitBoundsTrigger(prev => prev + 1)}
-                      className="flex-1 py-1.5 sm:py-2 px-3 bg-[#3b82f6] hover:bg-blue-500 text-white font-semibold text-[10px] sm:text-xs rounded-lg transition flex items-center justify-center space-x-1.5"
-                    >
-                      <Compass className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                      <span>Enfocar en Mapa</span>
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
         </main>
       </div>
 
