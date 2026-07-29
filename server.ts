@@ -8,11 +8,76 @@ async function startServer() {
   const PORT = 3000;
 
   // Use raw and json body parsers
-  app.use(express.json({ limit: '10mb' }));
-  app.use(express.text({ type: 'application/xml', limit: '10mb' }));
-  app.use(express.text({ type: 'text/plain', limit: '10mb' }));
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.text({ type: 'application/xml', limit: '50mb' }));
+  app.use(express.text({ type: 'text/plain', limit: '50mb' }));
 
   const kmlFilePath = path.join(process.cwd(), "src", "data", "current.kml");
+  const districtsFilePath = path.join(process.cwd(), "src", "data", "districts.json");
+
+  // API Route: Get currently persisted Districts structure
+  app.get("/api/districts", (req, res) => {
+    try {
+      if (fs.existsSync(districtsFilePath)) {
+        const districtsRaw = fs.readFileSync(districtsFilePath, "utf-8");
+        const parsed = JSON.parse(districtsRaw);
+        return res.json({ 
+          success: true, 
+          districts: parsed,
+          source: "server_storage"
+        });
+      } else {
+        return res.json({ 
+          success: false, 
+          districts: null,
+          message: "No hay distritos guardados en el servidor aún."
+        });
+      }
+    } catch (error: any) {
+      console.error("Error reading districts:", error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // API Route: Persist Districts structure in server
+  app.post("/api/districts", (req, res) => {
+    try {
+      const { districts, kmlText } = req.body;
+      if (!districts || !Array.isArray(districts)) {
+        return res.status(400).json({ success: false, error: "El cuerpo debe contener 'districts' como array." });
+      }
+
+      const dir = path.dirname(districtsFilePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+
+      // Save districts.json
+      fs.writeFileSync(districtsFilePath, JSON.stringify(districts, null, 2), "utf-8");
+
+      // Save combined current.kml if provided or extract from districts
+      let mainKmlText = kmlText;
+      if (!mainKmlText) {
+        const texts: string[] = [];
+        districts.forEach((d: any) => {
+          (d.kmlFiles || []).forEach((f: any) => {
+            if (f.kmlText) texts.push(f.kmlText);
+          });
+        });
+        if (texts.length > 0) mainKmlText = texts.join('\n\n');
+      }
+
+      if (mainKmlText && typeof mainKmlText === 'string') {
+        fs.writeFileSync(kmlFilePath, mainKmlText, "utf-8");
+      }
+
+      console.log("Distritos y KML guardados en servidor:", districtsFilePath);
+      return res.json({ success: true, message: "Distritos guardados permanentemente en servidor." });
+    } catch (error: any) {
+      console.error("Error writing districts:", error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  });
 
   // API Route: Get currently persisted KML
   app.get("/api/kml", (req, res) => {

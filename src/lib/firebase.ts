@@ -68,17 +68,35 @@ export async function saveKmlToFirestore(kmlText: string, userEmail: string, dis
     }
   }
 
-  // 4. Save metadata document
+  // 4. Save districtsJson in chunks if needed
+  let numDistrictsChunks = 0;
+  if (cleanDistrictsJson) {
+    const distChunks: string[] = [];
+    for (let i = 0; i < cleanDistrictsJson.length; i += chunkSize) {
+      distChunks.push(cleanDistrictsJson.substring(i, i + chunkSize));
+    }
+    numDistrictsChunks = distChunks.length;
+    const distPromises = distChunks.map((chunkText, i) => {
+      return setDoc(doc(db, "kml_data", `districts_chunk_${i}`), {
+        text: chunkText,
+        chunkIndex: i,
+      });
+    });
+    await Promise.all(distPromises);
+  }
+
+  // 5. Save metadata document
   const docRef = doc(db, "kml_data", "current");
   await setDoc(docRef, {
     isChunked: true,
     numChunks,
+    numDistrictsChunks,
     updatedAt: new Date().toISOString(),
     updatedBy: userEmail,
-    districtsJson: cleanDistrictsJson
+    districtsJson: (cleanDistrictsJson && cleanDistrictsJson.length < 300000) ? cleanDistrictsJson : null
   });
 
-  // 5. Clean up any excess old chunks if the new KML has fewer chunks
+  // 6. Clean up any excess old chunks if the new KML has fewer chunks
   if (prevNumChunks > numChunks) {
     const deletePromises = [];
     for (let i = numChunks; i < prevNumChunks; i++) {
@@ -107,9 +125,28 @@ export async function getKmlFromFirestore(): Promise<FirestoreKmlResult | null> 
     if (docSnap.exists()) {
       const data = docSnap.data();
       let districtsData = null;
-      if (data.districtsJson) {
+      let districtsJsonStr: string | null = data.districtsJson || null;
+
+      // If districtsJson was chunked, reconstruct it
+      if (!districtsJsonStr && data.numDistrictsChunks) {
+        const numDistChunks = data.numDistrictsChunks || 0;
+        const distChunkPromises = [];
+        for (let i = 0; i < numDistChunks; i++) {
+          distChunkPromises.push(getDoc(doc(db, "kml_data", `districts_chunk_${i}`)));
+        }
+        const distChunkSnaps = await Promise.all(distChunkPromises);
+        let reconstructedDist = "";
+        for (let i = 0; i < numDistChunks; i++) {
+          if (distChunkSnaps[i].exists()) {
+            reconstructedDist += distChunkSnaps[i].data().text || "";
+          }
+        }
+        districtsJsonStr = reconstructedDist || null;
+      }
+
+      if (districtsJsonStr) {
         try {
-          districtsData = JSON.parse(data.districtsJson);
+          districtsData = JSON.parse(districtsJsonStr);
         } catch (e) {
           console.warn("Could not parse districtsJson from Firestore:", e);
         }

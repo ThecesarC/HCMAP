@@ -1,0 +1,391 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>BRIGADA 2 DT11</name>
+    <description>Capa del BRIGADA 2 DT11</description>
+    
+    <Placemark>
+      <name>Sección 979</name>
+      <description>Sección electoral 979 - BRIGADA 2 DT11</description>
+      <ExtendedData>
+        <Data name="seccion">
+          <value>979</value>
+        </Data>
+        <Data name="distrito">
+          <value>11</value>
+        </Data>
+      </ExtendedData>
+      <Style>
+        <PolyStyle>
+          <color>8013458b</color>
+        </PolyStyle>
+        <LineStyle>
+          <color>ff13458b</color>
+          <width>2</width>
+        </LineStyle>
+      </Style>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              -101.188500,19.710000,0 -101.181850,19.709700,0 -101.181150,19.715700,0 -101.187800,19.716000,0 -101.188500,19.710000,0
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+  
+
+    <Placemark>
+      <name>Sección 980</name>
+      <description>Sección electoral 980 - BRIGADA 2 DT11</description>
+      <ExtendedData>
+        <Data name="seccion">
+          <value>980</value>
+        </Data>
+        <Data name="distrito">
+          <value>11</value>
+        </Data>
+      </ExtendedData>
+      <Style>
+        <PolyStyle>
+          <color>8013458b</color>
+        </PolyStyle>
+        <LineStyle>
+          <color>ff13458b</color>
+          <width>2</width>
+        </LineStyle>
+      </Style>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              -101.184000,19.711000,0 -101.176400,19.710700,0 -101.175600,19.716700,0 -101.183200,19.717000,0 -101.184000,19.711000,0
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+  
+
+    <Placemark>
+      <name>Sección 981</name>
+      <description>Sección electoral 981 - BRIGADA 2 DT11</description>
+      <ExtendedData>
+        <Data name="seccion">
+          <value>981</value>
+        </Data>
+        <Data name="distrito">
+          <value>11</value>
+        </Data>
+      </ExtendedData>
+      <Style>
+        <PolyStyle>
+          <color>8013458b</color>
+        </PolyStyle>
+        <LineStyle>
+          <color>ff13458b</color>
+          <width>2</width>
+        </LineStyle>
+      </Style>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              -101.184500,19.707500,0 -101.177850,19.707250,0 -101.177150,19.712250,0 -101.183800,19.712500,0 -101.184500,19.707500,0
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+  
+
+    <Placemark>
+      <name>Sección 982</name>
+      <description>Sección electoral 982 - BRIGADA 2 DT11</description>
+      <ExtendedData>
+        <Data name="seccion">
+          <value>982</value>
+        </Data>
+        <Data name="distrito">
+          <value>11</value>
+        </Data>
+      </ExtendedData>
+      <Style>
+        <PolyStyle>
+          <color>8013458b</color>
+        </PolyStyle>
+        <LineStyle>
+          <color>ff13458b</color>
+          <width>2</width>
+        </LineStyle>
+      </Style>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              -101.185000,19.703500,0 -101.179300,19.703250,0 -101.178700,19.708250,0 -101.184400,19.708500,0 -101.185000,19.703500,0
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+  
+
+    <Placemark>
+      <name>Sección 983</name>
+      <description>Sección electoral 983 - BRIGADA 2 DT11</description>
+      <ExtendedData>
+        <Data name="seccion">
+          <value>983</value>
+        </Data>
+        <Data name="distrito">
+          <value>11</value>
+        </Data>
+      </ExtendedData>
+      <Style>
+        <PolyStyle>
+          <color>8013458b</color>
+        </PolyStyle>
+        <LineStyle>
+          <color>ff13458b</color>
+          <width>2</width>
+        </LineStyle>
+      </Style>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              -101.180000,19.702000,0 -101.172400,19.701700,0 -101.171600,19.707700,0 -101.179200,19.708000,0 -101.180000,19.702000,0
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+  
+
+    <Placemark>
+      <name>Sección 984</name>
+      <description>Sección electoral 984 - BRIGADA 2 DT11</description>
+      <ExtendedData>
+        <Data name="seccion">
+          <value>984</value>
+        </Data>
+        <Data name="distrito">
+          <value>11</value>
+        </Data>
+      </ExtendedData>
+      <Style>
+        <PolyStyle>
+          <color>8013458b</color>
+        </PolyStyle>
+        <LineStyle>
+          <color>ff13458b</color>
+          <width>2</width>
+        </LineStyle>
+      </Style>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              -101.167500,19.716000,0 -101.143750,19.715400,0 -101.141250,19.727400,0 -101.165000,19.728000,0 -101.167500,19.716000,0
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+  
+
+    <Placemark>
+      <name>Sección 985</name>
+      <description>Sección electoral 985 - BRIGADA 2 DT11</description>
+      <ExtendedData>
+        <Data name="seccion">
+          <value>985</value>
+        </Data>
+        <Data name="distrito">
+          <value>11</value>
+        </Data>
+      </ExtendedData>
+      <Style>
+        <PolyStyle>
+          <color>8013458b</color>
+        </PolyStyle>
+        <LineStyle>
+          <color>ff13458b</color>
+          <width>2</width>
+        </LineStyle>
+      </Style>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              -101.184000,19.697000,0 -101.176400,19.696700,0 -101.175600,19.702700,0 -101.183200,19.703000,0 -101.184000,19.697000,0
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+  
+
+    <Placemark>
+      <name>Sección 1109</name>
+      <description>Sección electoral 1109 - BRIGADA 2 DT11</description>
+      <ExtendedData>
+        <Data name="seccion">
+          <value>1109</value>
+        </Data>
+        <Data name="distrito">
+          <value>11</value>
+        </Data>
+      </ExtendedData>
+      <Style>
+        <PolyStyle>
+          <color>8013458b</color>
+        </PolyStyle>
+        <LineStyle>
+          <color>ff13458b</color>
+          <width>2</width>
+        </LineStyle>
+      </Style>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              -101.172000,19.677000,0 -101.164400,19.676700,0 -101.163600,19.682700,0 -101.171200,19.683000,0 -101.172000,19.677000,0
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+  
+
+    <Placemark>
+      <name>Sección 1110</name>
+      <description>Sección electoral 1110 - BRIGADA 2 DT11</description>
+      <ExtendedData>
+        <Data name="seccion">
+          <value>1110</value>
+        </Data>
+        <Data name="distrito">
+          <value>11</value>
+        </Data>
+      </ExtendedData>
+      <Style>
+        <PolyStyle>
+          <color>8013458b</color>
+        </PolyStyle>
+        <LineStyle>
+          <color>ff13458b</color>
+          <width>2</width>
+        </LineStyle>
+      </Style>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              -101.168500,19.675500,0 -101.161850,19.675250,0 -101.161150,19.680250,0 -101.167800,19.680500,0 -101.168500,19.675500,0
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+  
+
+    <Placemark>
+      <name>Sección 1111</name>
+      <description>Sección electoral 1111 - BRIGADA 2 DT11</description>
+      <ExtendedData>
+        <Data name="seccion">
+          <value>1111</value>
+        </Data>
+        <Data name="distrito">
+          <value>11</value>
+        </Data>
+      </ExtendedData>
+      <Style>
+        <PolyStyle>
+          <color>8013458b</color>
+        </PolyStyle>
+        <LineStyle>
+          <color>ff13458b</color>
+          <width>2</width>
+        </LineStyle>
+      </Style>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              -101.165500,19.673500,0 -101.158850,19.673250,0 -101.158150,19.678250,0 -101.164800,19.678500,0 -101.165500,19.673500,0
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+  
+
+    <Placemark>
+      <name>Sección 1112</name>
+      <description>Sección electoral 1112 - BRIGADA 2 DT11</description>
+      <ExtendedData>
+        <Data name="seccion">
+          <value>1112</value>
+        </Data>
+        <Data name="distrito">
+          <value>11</value>
+        </Data>
+      </ExtendedData>
+      <Style>
+        <PolyStyle>
+          <color>8013458b</color>
+        </PolyStyle>
+        <LineStyle>
+          <color>ff13458b</color>
+          <width>2</width>
+        </LineStyle>
+      </Style>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              -101.163500,19.671500,0 -101.156850,19.671250,0 -101.156150,19.676250,0 -101.162800,19.676500,0 -101.163500,19.671500,0
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+  
+
+    <Placemark>
+      <name>Sección 1113</name>
+      <description>Sección electoral 1113 - BRIGADA 2 DT11</description>
+      <ExtendedData>
+        <Data name="seccion">
+          <value>1113</value>
+        </Data>
+        <Data name="distrito">
+          <value>11</value>
+        </Data>
+      </ExtendedData>
+      <Style>
+        <PolyStyle>
+          <color>8013458b</color>
+        </PolyStyle>
+        <LineStyle>
+          <color>ff13458b</color>
+          <width>2</width>
+        </LineStyle>
+      </Style>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              -101.161500,19.669500,0 -101.154850,19.669250,0 -101.154150,19.674250,0 -101.160800,19.674500,0 -101.161500,19.669500,0
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+  
+  </Document>
+</kml>

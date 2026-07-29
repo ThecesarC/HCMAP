@@ -41,13 +41,16 @@ import {
   EyeOff,
   X,
   Check,
-  Filter
+  Filter,
+  Save
 } from 'lucide-react';
 import { parseKml } from './utils/kmlParser';
 import { KmlDocument, KmlFeature, District, DistrictKmlFile, DistrictFeature } from './types';
 import { SAMPLES } from './data/samples';
 import { getKmlFromFirestore, saveKmlToFirestore } from './lib/firebase';
 import currentKmlText from './data/current.kml?raw';
+import brigada1KmlText from './data/brigada1.kml?raw';
+import brigada2KmlText from './data/brigada2.kml?raw';
 
 // Redefine Leaflet Default Icon behaviors to prevent path resolution bugs in dev servers
 // SafePolygon component to prevent react-leaflet Tooltip DOM removeChild unmount errors
@@ -575,7 +578,10 @@ export default function App() {
     ];
   });
 
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
+    const saved = localStorage.getItem('pref_sidebar_open');
+    return saved !== null ? JSON.parse(saved) : true;
+  });
   const [selectedDistrictFilter, setSelectedDistrictFilter] = useState<string>('all');
   const [selectedBrigadeFilter, setSelectedBrigadeFilter] = useState<string>('all');
 
@@ -593,7 +599,11 @@ export default function App() {
   const [newDistrictColorInput, setNewDistrictColorInput] = useState('#8b5cf6');
 
   // Custom coloring options
-  const [coloringMode, setColoringMode] = useState<'kml' | 'random' | 'property'>('kml');
+  const [coloringMode, setColoringMode] = useState<'kml' | 'random' | 'property'>(() => {
+    const saved = localStorage.getItem('pref_coloring_mode');
+    if (saved === 'kml' || saved === 'random' || saved === 'property') return saved;
+    return 'kml';
+  });
   const [colorByProperty, setColorByProperty] = useState<string>('');
   const [randomColors, setRandomColors] = useState<Record<string, string>>({});
 
@@ -604,7 +614,30 @@ export default function App() {
   const [filterSeccionesActive, setFilterSeccionesActive] = useState(false);
 
   // Map Base Tile (Streets by default, showing streets and colonies)
-  const [mapBase, setMapBase] = useState<'streets' | 'satellite' | 'dark'>('streets');
+  const [mapBase, setMapBase] = useState<'streets' | 'satellite' | 'dark'>(() => {
+    const saved = localStorage.getItem('pref_map_base');
+    if (saved === 'streets' || saved === 'satellite' || saved === 'dark') return saved;
+    return 'streets';
+  });
+
+  // Save user preferences to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('pref_sidebar_open', JSON.stringify(isSidebarOpen));
+    } catch (e) {}
+  }, [isSidebarOpen]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('pref_coloring_mode', coloringMode);
+    } catch (e) {}
+  }, [coloringMode]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('pref_map_base', mapBase);
+    } catch (e) {}
+  }, [mapBase]);
 
   // Save districts to localStorage whenever modified
   useEffect(() => {
@@ -706,36 +739,28 @@ export default function App() {
   // Load default sample or persisted KML on mount into Districts
   useEffect(() => {
     const initKml = async () => {
-      let serverKml: string | null = null;
+      let serverDistrictsData: District[] | null = null;
+      let serverKmlText: string | null = null;
 
-      // 1. Fetch official KML from server (/api/kml = src/data/current.kml)
+      // 1. Fetch official Districts and KML from server (/api/districts & /api/kml)
       try {
-        const res = await fetch('/api/kml');
-        const data = await res.json();
-        if (data.success && data.kml && !isFakeKml(data.kml)) {
-          serverKml = data.kml;
+        const resDist = await fetch('/api/districts');
+        const dataDist = await resDist.json();
+        if (dataDist.success && Array.isArray(dataDist.districts) && dataDist.districts.length > 0) {
+          serverDistrictsData = dataDist.districts;
+        }
+      } catch (err) {
+        console.warn("Could not fetch districts from local API server:", err);
+      }
+
+      try {
+        const resKml = await fetch('/api/kml');
+        const dataKml = await resKml.json();
+        if (dataKml.success && dataKml.kml && !isFakeKml(dataKml.kml)) {
+          serverKmlText = dataKml.kml;
         }
       } catch (err) {
         console.warn("Error fetching KML from local API server:", err);
-      }
-
-      let canonicalD11File: DistrictKmlFile | null = null;
-      try {
-        const kmlText = serverKml || currentKmlText;
-        if (kmlText) {
-          const parsed = parseKml(kmlText);
-          canonicalD11File = {
-            id: 'd11-brigada1-kml',
-            name: 'BRIGADA 1 DT11.kml',
-            brigade: 'Brigada 1',
-            enabled: true,
-            kmlText: kmlText,
-            kmlDoc: parsed,
-            uploadedAt: new Date().toLocaleDateString('es-MX')
-          };
-        }
-      } catch (e) {
-        console.error("Error parsing Brigada 1 KML:", e);
       }
 
       // 2. Try loading persisted data from Firestore
@@ -751,79 +776,145 @@ export default function App() {
         checkFirestoreQuotaError(fErr);
       }
 
-      let finalDistricts: District[] = [
-        {
-          id: 'distrito-11',
-          name: 'Distrito 11',
-          description: 'Polígonos y capas correspondientes al Distrito 11',
-          enabled: true,
-          color: '#16a34a',
-          kmlFiles: canonicalD11File ? [canonicalD11File] : []
-        }
-      ];
-
-      if (firestoreResult?.districtsData && Array.isArray(firestoreResult.districtsData) && firestoreResult.districtsData.length > 0) {
+      // 3. Load from localStorage fallback
+      let localDistrictsData: District[] | null = null;
+      const savedLocal = localStorage.getItem('districts_data_v2');
+      if (savedLocal) {
         try {
-          const restoredDistricts: District[] = firestoreResult.districtsData
-            .filter((d: any) => d.id !== 'distrito-8' && d.name !== 'Distrito 8')
-            .map((d: any) => ({
-              ...d,
-              kmlFiles: (d.kmlFiles || []).map((f: any) => {
-                if (f.kmlText) {
-                  try {
-                    const parsed = parseKml(f.kmlText);
-                    return { ...f, kmlDoc: parsed };
-                  } catch (e) {
-                    console.error("Error parsing restored file:", f.name, e);
-                    return null;
-                  }
-                }
-                return f;
-              }).filter((f: any) => f && f.kmlDoc && Array.isArray(f.kmlDoc.features))
-            }));
-
-          // Ensure Distrito 11 includes canonical BRIGADA 1 if missing, while preserving all existing files and brigadas
-          const d11Index = restoredDistricts.findIndex(d => d.id === 'distrito-11');
-          if (canonicalD11File) {
-            if (d11Index >= 0) {
-              const d11 = restoredDistricts[d11Index];
-              const existingFiles = d11.kmlFiles || [];
-              const hasCanonical = existingFiles.some((f: any) => f.name === canonicalD11File!.name || f.id === canonicalD11File!.id);
-              if (existingFiles.length === 0) {
-                restoredDistricts[d11Index] = {
-                  ...d11,
-                  enabled: true,
-                  kmlFiles: [canonicalD11File]
-                };
-              } else if (!hasCanonical) {
-                restoredDistricts[d11Index] = {
-                  ...d11,
-                  enabled: true,
-                  kmlFiles: [canonicalD11File, ...existingFiles]
-                };
-              }
-            } else {
-              restoredDistricts.push({
-                id: 'distrito-11',
-                name: 'Distrito 11',
-                description: 'Polígonos y capas correspondientes al Distrito 11',
-                enabled: true,
-                color: '#16a34a',
-                kmlFiles: [canonicalD11File]
-              });
-            }
+          const parsed = JSON.parse(savedLocal);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            localDistrictsData = parsed;
           }
-
-          if (restoredDistricts.some(d => d.kmlFiles && d.kmlFiles.length > 0)) {
-            finalDistricts = restoredDistricts;
-            console.log("¡Distritos y Brigadas restaurados exitosamente desde Firestore!");
-          }
-        } catch (rErr) {
-          console.error("Error restoring districts structure:", rErr);
+        } catch (e) {
+          console.warn("Could not parse local districts:", e);
         }
       }
 
-      setDistricts(finalDistricts);
+      // Canonical D11 default files (Brigada 1 and Brigada 2)
+      const canonicalD11Files: DistrictKmlFile[] = [];
+      try {
+        if (brigada1KmlText) {
+          canonicalD11Files.push({
+            id: 'd11-brigada1-kml',
+            name: 'BRIGADA 1 DT11.kml',
+            brigade: 'Brigada 1',
+            enabled: true,
+            kmlText: brigada1KmlText,
+            kmlDoc: parseKml(brigada1KmlText),
+            uploadedAt: new Date().toLocaleDateString('es-MX')
+          });
+        }
+        if (brigada2KmlText) {
+          canonicalD11Files.push({
+            id: 'd11-brigada2-kml',
+            name: 'BRIGADA 2 DT11.kml',
+            brigade: 'Brigada 2',
+            enabled: true,
+            kmlText: brigada2KmlText,
+            kmlDoc: parseKml(brigada2KmlText),
+            uploadedAt: new Date().toLocaleDateString('es-MX')
+          });
+        }
+      } catch (e) {
+        console.error("Error parsing default Brigada KMLs:", e);
+      }
+
+      // Merge source priority: Firestore > Server > LocalStorage
+      const candidateSources: District[][] = [];
+      if (firestoreResult?.districtsData && Array.isArray(firestoreResult.districtsData) && firestoreResult.districtsData.length > 0) {
+        candidateSources.push(firestoreResult.districtsData);
+      }
+      if (serverDistrictsData) {
+        candidateSources.push(serverDistrictsData);
+      }
+      if (localDistrictsData) {
+        candidateSources.push(localDistrictsData);
+      }
+
+      const processDistrictArray = (rawDistricts: any[]): District[] => {
+        return rawDistricts
+          .filter((d: any) => d.id !== 'distrito-8' && d.name !== 'Distrito 8')
+          .map((d: any) => ({
+            ...d,
+            kmlFiles: (d.kmlFiles || []).map((f: any) => {
+              if (f.kmlText) {
+                try {
+                  const parsed = parseKml(f.kmlText);
+                  return { ...f, kmlDoc: parsed };
+                } catch (e) {
+                  console.error("Error parsing file:", f.name, e);
+                  return null;
+                }
+              }
+              return f;
+            }).filter((f: any) => f && f.kmlDoc && Array.isArray(f.kmlDoc.features))
+          }));
+      };
+
+      let mergedDistricts: District[] = candidateSources.length > 0 
+        ? processDistrictArray(candidateSources[0])
+        : [
+            {
+              id: 'distrito-11',
+              name: 'Distrito 11',
+              description: 'Polígonos y capas correspondientes al Distrito 11',
+              enabled: true,
+              color: '#16a34a',
+              kmlFiles: [...canonicalD11Files]
+            }
+          ];
+
+      // Merge secondary sources so no user-uploaded file is ever lost
+      for (let s = 1; s < candidateSources.length; s++) {
+        const secondary = processDistrictArray(candidateSources[s]);
+        secondary.forEach(secDist => {
+          const targetDistIndex = mergedDistricts.findIndex(d => d.id === secDist.id);
+          if (targetDistIndex >= 0) {
+            const existingDist = mergedDistricts[targetDistIndex];
+            secDist.kmlFiles.forEach(secFile => {
+              const fileExists = existingDist.kmlFiles.some(f => f.name === secFile.name || f.id === secFile.id);
+              if (!fileExists) {
+                existingDist.kmlFiles.push(secFile);
+              }
+            });
+          } else {
+            mergedDistricts.push(secDist);
+          }
+        });
+      }
+
+      // Ensure Distrito 11 includes canonicalD11Files if missing
+      const d11Idx = mergedDistricts.findIndex(d => d.id === 'distrito-11');
+      if (canonicalD11Files.length > 0) {
+        if (d11Idx >= 0) {
+          const d11 = mergedDistricts[d11Idx];
+          if (!d11.kmlFiles || d11.kmlFiles.length === 0) {
+            d11.kmlFiles = [...canonicalD11Files];
+          } else {
+            canonicalD11Files.forEach(cFile => {
+              const hasCanonical = d11.kmlFiles.some(f => f.name === cFile.name || f.id === cFile.id);
+              if (!hasCanonical) {
+                d11.kmlFiles.push(cFile);
+              }
+            });
+          }
+        } else {
+          mergedDistricts.unshift({
+            id: 'distrito-11',
+            name: 'Distrito 11',
+            description: 'Polígonos y capas correspondientes al Distrito 11',
+            enabled: true,
+            color: '#16a34a',
+            kmlFiles: [...canonicalD11Files]
+          });
+        }
+      }
+
+      setDistricts(mergedDistricts);
+
+      try {
+        localStorage.setItem('districts_data_v2', JSON.stringify(mergedDistricts));
+      } catch (e) {}
 
       setTimeout(() => {
         setFitAllTrigger(prev => prev + 1);
@@ -848,7 +939,7 @@ export default function App() {
       const fallbackKml = localStorage.getItem('persisted_kml_content') || '';
       const mainKmlText = allKmlTexts.length > 0 ? allKmlTexts.join('\n\n') : fallbackKml;
 
-      // 1. Save to Firebase Firestore (Primary, saving full districts structure)
+      // 1. Save to Firebase Firestore
       let firestoreSuccess = false;
       try {
         await saveKmlToFirestore(mainKmlText, currentUser?.email || 'admin', districts);
@@ -858,15 +949,13 @@ export default function App() {
         checkFirestoreQuotaError(fErr);
       }
 
-      // 2. Save to Express server (fallback)
+      // 2. Save to Express server (/api/districts and /api/kml)
       let serverSuccess = false;
       try {
-        const res = await fetch('/api/kml', {
+        const res = await fetch('/api/districts', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ kmlText: mainKmlText })
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ districts, kmlText: mainKmlText })
         });
         const data = await res.json();
         if (data.success) {
@@ -876,20 +965,15 @@ export default function App() {
         console.warn("Express server save skipped or failed:", sErr);
       }
 
-      if (firestoreSuccess) {
+      if (firestoreSuccess || serverSuccess) {
         setServerSaveMessage({ 
           type: 'success', 
-          text: '¡Guardado permanentemente en Firebase! Todos los Distritos y Brigadas están publicados.' 
-        });
-      } else if (serverSuccess) {
-        setServerSaveMessage({ 
-          type: 'success', 
-          text: '¡Guardado con éxito en el servidor de forma permanente!' 
+          text: '¡Guardado con éxito de forma permanente! Todos los Distritos y Brigadas están publicados.' 
         });
       } else {
         setServerSaveMessage({ 
           type: 'error', 
-          text: 'No se pudo guardar en Firebase ni en el servidor. Verifica las reglas de Firestore.' 
+          text: 'No se pudo guardar en Firebase ni en el servidor. Intenta de nuevo.' 
         });
       }
     } catch (err: any) {
@@ -1051,6 +1135,16 @@ export default function App() {
         });
       });
       const combinedText = allKmlTexts.length > 0 ? allKmlTexts.join('\n\n') : pendingKmlText;
+
+      try {
+        await fetch('/api/districts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ districts: result.updatedDistricts, kmlText: combinedText })
+        });
+      } catch (sErr) {
+        console.warn("Auto-sync to server skipped:", sErr);
+      }
 
       try {
         await saveKmlToFirestore(combinedText, currentUser?.email || 'bunkerhrv@gmail.com', result.updatedDistricts);
@@ -1393,8 +1487,26 @@ export default function App() {
           )}
         </div>
         
-        {/* Google Authentication Account Profile Selector */}
-        <div className="relative">
+        {/* Google Authentication & Save Changes Button */}
+        <div className="flex items-center space-x-3 relative">
+          {isAdmin && (
+            <button
+              onClick={saveKmlToServer}
+              disabled={isSavingToServer}
+              className={`px-3.5 py-1.5 rounded-xl font-extrabold text-xs flex items-center space-x-2 border shadow-lg transition cursor-pointer select-none ${
+                isSavingToServer
+                  ? 'bg-emerald-950 text-emerald-400 border-emerald-800 opacity-80 cursor-wait'
+                  : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500/80 hover:shadow-emerald-900/50 active:scale-[0.98]'
+              }`}
+              title="Guardar y publicar todos los cambios permanentemente en Firebase y el Servidor"
+            >
+              <Save className="w-4 h-4" />
+              <span className="tracking-wide">
+                {isSavingToServer ? 'GUARDANDO...' : 'GUARDAR CAMBIOS'}
+              </span>
+            </button>
+          )}
+
           {currentUser ? (
             <button
               onClick={() => setIsProfileOpen(!isProfileOpen)}
@@ -1709,6 +1821,29 @@ export default function App() {
                   />
                 </div>
               </div>
+            </div>
+
+            {/* Sidebar Save Changes Action Block */}
+            <div className="p-3 border-t border-[#1e293b] bg-slate-900/90 space-y-2">
+              <button
+                onClick={saveKmlToServer}
+                disabled={isSavingToServer}
+                className={`w-full py-2.5 px-4 rounded-xl font-extrabold text-xs tracking-wider flex items-center justify-center space-x-2 border shadow-lg transition-all cursor-pointer ${
+                  isSavingToServer
+                    ? 'bg-emerald-950 text-emerald-400 border-emerald-800 opacity-80 cursor-wait'
+                    : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500 hover:shadow-emerald-950/50 active:scale-[0.98]'
+                }`}
+              >
+                <Save className="w-4 h-4" />
+                <span>{isSavingToServer ? 'GUARDANDO CAMBIOS...' : 'GUARDAR CAMBIOS'}</span>
+              </button>
+              {serverSaveMessage && (
+                <div className={`p-2 rounded-lg text-[11px] text-center font-medium ${
+                  serverSaveMessage.type === 'success' ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800' : 'bg-rose-950/80 text-rose-300 border border-rose-800'
+                }`}>
+                  {serverSaveMessage.text}
+                </div>
+              )}
             </div>
 
             {/* Sidebar Footer */}
