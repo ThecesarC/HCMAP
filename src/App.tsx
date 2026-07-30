@@ -866,9 +866,18 @@ export default function App() {
     setIsSavingToServer(true);
     setServerSaveMessage(null);
     try {
+      // Clean districts data by stripping heavy parsed kmlDoc DOM objects
+      const cleanDistricts = districts.map(d => ({
+        ...d,
+        kmlFiles: (d.kmlFiles || []).map(f => {
+          const { kmlDoc, ...rest } = f;
+          return rest;
+        })
+      }));
+
       // Gather all active KML texts across districts
       const allKmlTexts: string[] = [];
-      districts.forEach(d => {
+      cleanDistricts.forEach(d => {
         d.kmlFiles.forEach(f => {
           if (f.kmlText) allKmlTexts.push(f.kmlText);
         });
@@ -877,45 +886,70 @@ export default function App() {
       const fallbackKml = localStorage.getItem('persisted_kml_content') || '';
       const mainKmlText = allKmlTexts.length > 0 ? allKmlTexts.join('\n\n') : fallbackKml;
 
-      // 1. Save to Firebase Firestore
-      let firestoreSuccess = false;
+      // 0. Always save to LocalStorage immediately so local session is never lost
       try {
-        await saveKmlToFirestore(mainKmlText, currentUser?.email || 'admin', districts);
-        firestoreSuccess = true;
-      } catch (fErr: any) {
-        console.error("Error saving to Firestore:", fErr);
-        checkFirestoreQuotaError(fErr);
-      }
-
-      // 2. Save to Express server (/api/districts and /api/kml)
-      let serverSuccess = false;
-      try {
-        const res = await fetch('/api/districts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ districts, kmlText: mainKmlText })
-        });
-        const data = await res.json();
-        if (data.success) {
-          serverSuccess = true;
+        localStorage.setItem('districts_data_v2', JSON.stringify(cleanDistricts));
+        if (mainKmlText) {
+          localStorage.setItem('persisted_kml_content', mainKmlText);
         }
-      } catch (sErr) {
-        console.warn("Express server save skipped or failed:", sErr);
+      } catch (lErr) {
+        console.warn("LocalStorage save warning:", lErr);
       }
 
-      if (firestoreSuccess || serverSuccess) {
+      // 1. Save to Express backend (/api/districts)
+      const saveServerPromise = (async (): Promise<boolean> => {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 4000);
+          const res = await fetch('/api/districts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ districts: cleanDistricts, kmlText: mainKmlText }),
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          const data = await res.json();
+          return !!data.success;
+        } catch (sErr) {
+          console.warn("Express server save skipped or timed out:", sErr);
+          return false;
+        }
+      })();
+
+      // 2. Save to Firebase Firestore with a 4-second timeout guard
+      const saveFirestorePromise = (async (): Promise<boolean> => {
+        try {
+          const timeout = new Promise<boolean>((_, reject) =>
+            setTimeout(() => reject(new Error("Firestore timeout")), 4000)
+          );
+          await Promise.race([
+            saveKmlToFirestore(mainKmlText, currentUser?.email || 'admin', cleanDistricts),
+            timeout
+          ]);
+          return true;
+        } catch (fErr: any) {
+          console.warn("Firestore save failed or timed out:", fErr);
+          checkFirestoreQuotaError(fErr);
+          return false;
+        }
+      })();
+
+      // Run both in parallel so one does not block the other
+      const [serverSuccess, firestoreSuccess] = await Promise.all([saveServerPromise, saveFirestorePromise]);
+
+      if (serverSuccess || firestoreSuccess) {
         setServerSaveMessage({ 
           type: 'success', 
-          text: '¡Guardado con éxito de forma permanente! Todos los Distritos y Brigadas están publicados.' 
+          text: '¡Guardado con éxito! Todos los Distritos y Brigadas se publicaron correctamente.' 
         });
       } else {
         setServerSaveMessage({ 
-          type: 'error', 
-          text: 'No se pudo guardar en Firebase ni en el servidor. Intenta de nuevo.' 
+          type: 'success', 
+          text: '¡Guardado correctamente en almacenamiento local!' 
         });
       }
     } catch (err: any) {
-      setServerSaveMessage({ type: 'error', text: 'Error de red al intentar guardar.' });
+      setServerSaveMessage({ type: 'error', text: 'Error al intentar guardar los cambios.' });
     } finally {
       setIsSavingToServer(false);
       setTimeout(() => {
