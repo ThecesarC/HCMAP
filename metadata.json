@@ -1,5 +1,5 @@
 {
-  "name": "HC.MAP",
+  "name": "HCES.MAPS",
   "description": "Sube archivos KML con polígonos para visualizarlos en un mapa interactivo satelital con soporte para filtrado de secciones y persistencia de datos.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

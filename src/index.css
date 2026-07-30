@@ -13,6 +13,18 @@
     from { transform: translateY(-16px); opacity: 0; }
     to { transform: translateY(0); opacity: 1; }
   }
+  @keyframes blinkRed {
+    0%, 100% {
+      opacity: 1;
+      color: #ef4444;
+      text-shadow: 0 0 10px rgba(239, 68, 68, 0.9), 0 0 20px rgba(239, 68, 68, 0.6);
+    }
+    50% {
+      opacity: 0.3;
+      color: #f87171;
+      text-shadow: 0 0 2px rgba(239, 68, 68, 0.2);
+    }
+  }
   
   .animate-fadeIn {
     animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
@@ -22,6 +34,9 @@
   }
   .animate-slideDown {
     animation: slideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+  .animate-blink-red {
+    animation: blinkRed 1s infinite ease-in-out;
   }
 }
 

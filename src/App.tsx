@@ -1434,7 +1434,15 @@ export default function App() {
           )}
 
           <div className="flex items-center">
-            <span className="font-extrabold tracking-tight text-red-500 text-lg">HC.MAP</span>
+            <a
+              href="https://wa.me/524434008893?text=HOLA%20CESAR,%20REQUIERO%20INFORMACION..."
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-extrabold tracking-tight text-red-500 text-lg sm:text-xl animate-blink-red hover:scale-105 transition-transform duration-200 cursor-pointer select-none inline-flex items-center"
+              title="Enviar mensaje de WhatsApp a César (4434008893)"
+            >
+              HCES.MAPS
+            </a>
             <span className="ml-2 text-[#475569] text-xs font-semibold px-2 py-0.5 bg-slate-950/45 rounded border border-slate-800/40 hidden md:inline">Visor de Capas</span>
           </div>
 
@@ -1460,43 +1468,64 @@ export default function App() {
         </div>
         
         {/* Google Authentication & Save Changes Button */}
-        <div className="flex items-center space-x-3 relative">
+        <div className="flex items-center space-x-2 sm:space-x-3">
           {isAdmin && (
             <button
               onClick={saveKmlToServer}
               disabled={isSavingToServer}
-              className={`px-3.5 py-1.5 rounded-xl font-extrabold text-xs flex items-center space-x-2 border shadow-lg transition cursor-pointer select-none ${
+              className={`px-3 py-1.5 rounded-xl font-extrabold text-xs flex items-center space-x-1.5 border shadow-lg transition cursor-pointer select-none ${
                 isSavingToServer
                   ? 'bg-emerald-950 text-emerald-400 border-emerald-800 opacity-80 cursor-wait'
                   : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500/80 hover:shadow-emerald-900/50 active:scale-[0.98]'
               }`}
-              title="Guardar y publicar todos los cambios permanentemente en Firebase y el Servidor"
+              title="Guardar y publicar todos los cambios permanentemente"
             >
-              <Save className="w-4 h-4" />
-              <span className="tracking-wide">
+              <Save className="w-3.5 h-3.5" />
+              <span className="tracking-wide text-[11px] sm:text-xs">
                 {isSavingToServer ? 'GUARDANDO...' : 'GUARDAR CAMBIOS'}
               </span>
             </button>
           )}
 
           {currentUser ? (
-            <button
-              onClick={() => setIsProfileOpen(!isProfileOpen)}
-              className="flex items-center space-x-2.5 bg-slate-950/50 hover:bg-slate-900/80 border border-slate-800 rounded-full py-1.5 pl-2.5 pr-3.5 transition select-none cursor-pointer"
-            >
-              <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold text-white uppercase shadow-inner">
+            <div className="flex items-center space-x-2 bg-slate-950/60 border border-slate-800/80 rounded-xl py-1 px-2 sm:px-2.5 transition select-none">
+              <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold text-white uppercase shadow-inner flex-shrink-0">
                 {currentUser.avatar || currentUser.email[0]}
               </div>
-              <div className="text-left hidden sm:block">
-                <p className="text-[11px] font-bold text-slate-200 leading-tight">
+              
+              <div className="text-left max-w-[120px] sm:max-w-[160px] truncate hidden md:block">
+                <p className="text-[11px] font-bold text-slate-200 leading-tight truncate">
                   {currentUser.name}
                 </p>
-                <p className="text-[9px] text-slate-400 font-mono leading-none">
+                <p className="text-[9px] text-slate-400 font-mono leading-none truncate">
                   {currentUser.email}
                 </p>
               </div>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-            </button>
+
+              {isAdmin ? (
+                <span className="hidden sm:inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                  <Shield className="w-2.5 h-2.5 mr-0.5" />
+                  Admin
+                </span>
+              ) : (
+                <span className="hidden sm:inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-800 text-slate-400 border border-slate-700">
+                  <User className="w-2.5 h-2.5 mr-0.5" />
+                  Usuario
+                </span>
+              )}
+
+              {/* Quick inline logout button */}
+              <button
+                onClick={() => {
+                  setCurrentUser(null);
+                  localStorage.removeItem('google_user');
+                }}
+                className="p-1 text-slate-400 hover:text-rose-400 hover:bg-slate-800/60 rounded-lg transition cursor-pointer ml-1"
+                title="Cerrar sesión"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            </div>
           ) : (
             <button
               onClick={() => {
@@ -1504,101 +1533,11 @@ export default function App() {
                 setCurrentUser(u);
                 localStorage.setItem('google_user', JSON.stringify(u));
               }}
-              className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs py-2 px-3.5 rounded-full transition shadow-lg cursor-pointer"
+              className="flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs py-1.5 px-3 rounded-xl transition shadow cursor-pointer"
             >
               <User className="w-3.5 h-3.5" />
-              <span>Acceder con Google</span>
+              <span>Acceder</span>
             </button>
-          )}
-
-          {/* Google Style Profile Dropdown menu */}
-          {isProfileOpen && currentUser && (
-            <div className="absolute right-0 mt-2 w-72 bg-[#0f172a] border border-[#1e293b] rounded-2xl shadow-2xl p-4 z-50 animate-fadeIn backdrop-blur-md">
-              <div className="flex flex-col items-center text-center pb-3 border-b border-slate-800">
-                <div className="w-12 h-12 rounded-full bg-blue-600 text-lg font-bold text-white flex items-center justify-center mb-2 uppercase shadow">
-                  {currentUser.avatar || currentUser.email[0]}
-                </div>
-                <h4 className="text-sm font-bold text-slate-100">{currentUser.name}</h4>
-                <p className="text-xs text-slate-400 font-mono">{currentUser.email}</p>
-                
-                {isAdmin ? (
-                  <span className="mt-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">
-                    <Shield className="w-2.5 h-2.5 mr-1" />
-                    ADMINISTRADOR (Google)
-                  </span>
-                ) : (
-                  <span className="mt-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700">
-                    <User className="w-2.5 h-2.5 mr-1" />
-                    USUARIO NORMAL
-                  </span>
-                )}
-              </div>
-
-              {/* Account Quick Switch - Only shown to Admins */}
-              {isAdmin && (
-                <div className="py-3 space-y-2 border-b border-slate-800">
-                  <p className="text-[9px] uppercase font-bold text-slate-500 tracking-wider text-left">Cambiar cuenta para pruebas:</p>
-                  
-                  {/* Admin account */}
-                  <button
-                    onClick={() => {
-                      const u = { email: 'hugocesarlemuscortes@gmail.com', name: 'Hugo César Lemus Cortés', avatar: 'H' };
-                      setCurrentUser(u);
-                      localStorage.setItem('google_user', JSON.stringify(u));
-                      setIsProfileOpen(false);
-                    }}
-                    className={`w-full flex items-center justify-between p-2 rounded-xl text-left transition text-xs cursor-pointer ${
-                      isAdmin 
-                        ? 'bg-blue-600/10 border border-blue-500/30 text-white font-semibold' 
-                        : 'hover:bg-slate-900 border border-transparent text-slate-300'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-2">
-                      <span className="w-5 h-5 rounded-full bg-rose-600 text-white font-bold text-[10px] flex items-center justify-center">H</span>
-                      <div className="min-w-0">
-                        <p className="leading-tight truncate">hugocesarlemuscortes@gmail.com</p>
-                        <p className="text-[9px] text-slate-400 font-mono">Administrador</p>
-                      </div>
-                    </div>
-                  </button>
-
-                  {/* Normal account */}
-                  <button
-                    onClick={() => {
-                      const u = { email: 'bunkerhrv@gmail.com', name: 'Bunker HRV', avatar: 'B' };
-                      setCurrentUser(u);
-                      localStorage.setItem('google_user', JSON.stringify(u));
-                      setIsProfileOpen(false);
-                    }}
-                    className={`w-full flex items-center justify-between p-2 rounded-xl text-left transition text-xs cursor-pointer ${
-                      currentUser.email === 'bunkerhrv@gmail.com' 
-                        ? 'bg-blue-600/10 border border-blue-500/30 text-white font-semibold' 
-                        : 'hover:bg-slate-900 border border-transparent text-slate-300'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-2">
-                      <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-bold text-[10px] flex items-center justify-center">B</span>
-                      <div className="min-w-0">
-                        <p className="leading-tight truncate">bunkerhrv@gmail.com</p>
-                        <p className="text-[9px] text-slate-400 font-mono">Usuario Normal</p>
-                      </div>
-                    </div>
-                  </button>
-                </div>
-              )}
-
-              <button
-                onClick={() => {
-                  setCurrentUser(null);
-                  localStorage.removeItem('google_user');
-                  setIsProfileOpen(false);
-                }}
-                className="w-full mt-3 flex items-center justify-center space-x-1.5 py-2 text-xs text-slate-400 hover:text-rose-400 bg-slate-900 hover:bg-rose-950/20 rounded-xl transition cursor-pointer"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                <span>Cerrar sesión de Google</span>
-              </button>
-            </div>
           )}
         </div>
       </header>
