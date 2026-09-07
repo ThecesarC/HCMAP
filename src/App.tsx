@@ -42,12 +42,15 @@ import {
   X,
   Check,
   Filter,
-  Save
+  Save,
+  FileSpreadsheet,
+  Download
 } from 'lucide-react';
 import { parseKml } from './utils/kmlParser';
 import { KmlDocument, KmlFeature, District, DistrictKmlFile, DistrictFeature } from './types';
 import { SAMPLES } from './data/samples';
 import { getKmlFromFirestore, saveKmlToFirestore } from './lib/firebase';
+import { exportBrigadesToExcel } from './utils/excelExport';
 import currentKmlText from './data/current.kml?raw';
 import brigada1KmlText from './data/brigada1.kml?raw';
 import brigada2KmlText from './data/brigada2.kml?raw';
@@ -270,6 +273,15 @@ function MapController({
 }
 
 const ALLOWED_SECCIONES = [
+  // Distrito 11 (64 secciones de Morelia distribuidas en 2 brigadas)
+  "968", "969", "970", "971", "974", "975", "976", "977", "978", "979",
+  "980", "981", "982", "983", "984", "985", "987", "988", "989", "990",
+  "991", "992", "993", "994", "995", "1024", "1025", "1026", "1027", "1028",
+  "1029", "1030", "1031", "1032", "1033", "1034", "1036", "1037", "1038", "1039",
+  "1040", "1042", "1070", "1071", "1072", "1081", "1082", "1084", "1085", "1086",
+  "1087", "1094", "1095", "1096", "1098", "1099", "1100", "1101", "1104", "1105",
+  "1106", "1108", "1109", "1206",
+  // Secciones históricas adicionales
   "2729", "2802", "2804", "2805", "1145", "1148", "1149", "1151", "1152", "1153",
   "1161", "2809", "2810", "2811", "2814", "2815", "2776", "1008", "1052", "1060",
   "1061", "1141", "1142", "1047", "1022", "1211", "1019", "1210", "2721", "2748"
@@ -397,18 +409,33 @@ const carriesArea = (feature: KmlFeature): boolean => {
   return false;
 };
 
-// Palette of distinct colors for Brigadas
+// Palette of distinct colors for Brigadas (Brigada 1: Rojo, Brigada 2: Azul)
 const PALETTE_BRIGADAS = [
-  { fill: '#16a34a', border: '#15803d', defaultName: 'Brigada 1' }, // Emerald / Green
-  { fill: '#8b4513', border: '#5c2e0b', defaultName: 'Brigada 2' }, // SaddleBrown / Brown
-  { fill: '#dc2626', border: '#991b1b', defaultName: 'Brigada 3' }, // Red
-  { fill: '#2563eb', border: '#1d4ed8', defaultName: 'Brigada 4' }, // Blue
-  { fill: '#9333ea', border: '#6b21a8', defaultName: 'Brigada 5' }, // Purple
+  { fill: '#dc2626', border: '#991b1b', defaultName: 'Brigada 1' }, // Rojo / Red
+  { fill: '#2563eb', border: '#1d4ed8', defaultName: 'Brigada 2' }, // Azul / Blue
+  { fill: '#16a34a', border: '#15803d', defaultName: 'Brigada 3' }, // Verde / Green
+  { fill: '#8b4513', border: '#5c2e0b', defaultName: 'Brigada 4' }, // Marrón / Brown
+  { fill: '#9333ea', border: '#6b21a8', defaultName: 'Brigada 5' }, // Púrpura / Purple
   { fill: '#0284c7', border: '#0369a1', defaultName: 'Brigada 6' }, // Sky
-  { fill: '#ea580c', border: '#c2410c', defaultName: 'Brigada 7' }, // Orange
-  { fill: '#db2777', border: '#be185d', defaultName: 'Brigada 8' }, // Pink
+  { fill: '#ea580c', border: '#c2410c', defaultName: 'Brigada 7' }, // Naranja
+  { fill: '#db2777', border: '#be185d', defaultName: 'Brigada 8' }, // Rosa
   { fill: '#0d9488', border: '#0f766e', defaultName: 'Brigada 9' }, // Teal
-  { fill: '#7c3aed', border: '#6d28d9', defaultName: 'Brigada 10' }  // Violet
+  { fill: '#7c3aed', border: '#6d28d9', defaultName: 'Brigada 10' }  // Violeta
+];
+
+// Secciones electorales de Morelia agrupadas en 2 Brigadas balanceadas (32 secciones cada una) por proximidad métrica
+const SECCIONES_BRIGADA_1 = [
+  '968', '969', '970', '971', '974', '975', '976', '977', '978', '987', 
+  '988', '989', '990', '991', '992', '993', '994', '995', '1024', '1025', 
+  '1026', '1027', '1028', '1029', '1030', '1031', '1032', '1042', '1070', 
+  '1071', '1072', '1206'
+];
+
+const SECCIONES_BRIGADA_2 = [
+  '979', '980', '981', '982', '983', '984', '985', '1033', '1034', '1036', 
+  '1037', '1038', '1039', '1040', '1081', '1082', '1084', '1085', '1086', 
+  '1087', '1094', '1095', '1096', '1098', '1099', '1100', '1101', '1104', 
+  '1105', '1106', '1108', '1109'
 ];
 
 function getFeatureBrigadeInfo(feature: any): { key: string; name: string; color: string; border: string } {
@@ -458,23 +485,21 @@ function getFeatureBrigadeInfo(feature: any): { key: string; name: string; color
     }
   }
 
-  // 4. Default section mappings for sample Distrito 8
+  // 4. Default section mappings for Morelia (32 secciones en Brigada 1 Rojo, 32 secciones en Brigada 2 Azul)
   const secVal = getSeccionValue(feature);
   if (secVal) {
+    if (SECCIONES_BRIGADA_1.includes(secVal)) {
+      return { key: 'brigada-1', name: 'Brigada 1', color: PALETTE_BRIGADAS[0].fill, border: PALETTE_BRIGADAS[0].border };
+    }
+    if (SECCIONES_BRIGADA_2.includes(secVal)) {
+      return { key: 'brigada-2', name: 'Brigada 2', color: PALETTE_BRIGADAS[1].fill, border: PALETTE_BRIGADAS[1].border };
+    }
+    // Mapeo retrocompatible para secciones de muestra adicionales
     if (['1145', '1148', '1149', '1151', '1152', '1153', '1161', '2810', '2811', '2814', '2815', '2776', '1047'].includes(secVal)) {
       return { key: 'brigada-1', name: 'Brigada 1', color: PALETTE_BRIGADAS[0].fill, border: PALETTE_BRIGADAS[0].border };
     }
     if (['2802', '2804', '2805', '1008'].includes(secVal)) {
       return { key: 'brigada-2', name: 'Brigada 2', color: PALETTE_BRIGADAS[1].fill, border: PALETTE_BRIGADAS[1].border };
-    }
-    if (['2729', '1211', '1019', '2721', '2809'].includes(secVal)) {
-      return { key: 'brigada-3', name: 'Brigada 3', color: PALETTE_BRIGADAS[2].fill, border: PALETTE_BRIGADAS[2].border };
-    }
-    if (['1022', '1210', '2748'].includes(secVal)) {
-      return { key: 'brigada-4', name: 'Brigada 4', color: PALETTE_BRIGADAS[3].fill, border: PALETTE_BRIGADAS[3].border };
-    }
-    if (['1052', '1060', '1061', '1141', '1142'].includes(secVal)) {
-      return { key: 'brigada-5', name: 'Brigada 5', color: PALETTE_BRIGADAS[4].fill, border: PALETTE_BRIGADAS[4].border };
     }
   }
 
@@ -492,7 +517,7 @@ export default function App() {
 
   // Districts & Brigades State Management
   const [districts, setDistricts] = useState<District[]>(() => {
-    const saved = localStorage.getItem('districts_data_v2');
+    const saved = localStorage.getItem('districts_data_v3');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -501,16 +526,16 @@ export default function App() {
           if (filtered.length > 0) return filtered;
         }
       } catch (e) {
-        console.warn("Could not parse saved districts_data_v2:", e);
+        console.warn("Could not parse saved districts_data_v3:", e);
       }
     }
     return [
       {
         id: 'distrito-11',
         name: 'Distrito 11',
-        description: 'Polígonos y capas correspondientes al Distrito 11',
+        description: 'Polígonos y secciones de Morelia distribuidos en 2 Brigadas por proximidad métrica',
         enabled: true,
-        color: '#16a34a', // Emerald green theme
+        color: '#dc2626', // Rojo
         kmlFiles: []
       }
     ];
@@ -581,7 +606,7 @@ export default function App() {
   useEffect(() => {
     if (districts && districts.length > 0) {
       try {
-        localStorage.setItem('districts_data_v2', JSON.stringify(districts));
+        localStorage.setItem('districts_data_v3', JSON.stringify(districts));
       } catch (e) {
         console.warn("Error saving districts to localStorage:", e);
       }
@@ -716,7 +741,7 @@ export default function App() {
 
       // 3. Load from localStorage fallback
       let localDistrictsData: District[] | null = null;
-      const savedLocal = localStorage.getItem('districts_data_v2');
+      const savedLocal = localStorage.getItem('districts_data_v3');
       if (savedLocal) {
         try {
           const parsed = JSON.parse(savedLocal);
@@ -795,21 +820,26 @@ export default function App() {
             {
               id: 'distrito-11',
               name: 'Distrito 11',
-              description: 'Polígonos y capas correspondientes al Distrito 11',
+              description: 'Polígonos y secciones de Morelia distribuidos en 2 Brigadas por proximidad métrica',
               enabled: true,
-              color: '#16a34a',
+              color: '#dc2626',
               kmlFiles: [...canonicalD11Files]
             }
           ];
 
-      // Merge secondary sources so no user-uploaded file is ever lost
+      // Merge secondary sources so no user-uploaded file is lost, skipping obsolete brigades if 2-brigade setup is active
       for (let s = 1; s < candidateSources.length; s++) {
         const secondary = processDistrictArray(candidateSources[s]);
         secondary.forEach(secDist => {
           const targetDistIndex = mergedDistricts.findIndex(d => d.id === secDist.id);
           if (targetDistIndex >= 0) {
             const existingDist = mergedDistricts[targetDistIndex];
+            const hasBothBrigades = existingDist.kmlFiles.some(f => f.brigade === 'Brigada 1') && existingDist.kmlFiles.some(f => f.brigade === 'Brigada 2');
             secDist.kmlFiles.forEach(secFile => {
+              // Avoid resurrecting obsolete brigades 3, 4, 5
+              if (hasBothBrigades && ['Brigada 3', 'Brigada 4', 'Brigada 5'].includes(secFile.brigade || '')) {
+                return;
+              }
               const fileExists = existingDist.kmlFiles.some(f => f.name === secFile.name || f.id === secFile.id);
               if (!fileExists) {
                 existingDist.kmlFiles.push(secFile);
@@ -840,9 +870,9 @@ export default function App() {
           mergedDistricts.unshift({
             id: 'distrito-11',
             name: 'Distrito 11',
-            description: 'Polígonos y capas correspondientes al Distrito 11',
+            description: 'Polígonos y secciones de Morelia distribuidos en 2 Brigadas por proximidad métrica',
             enabled: true,
-            color: '#16a34a',
+            color: '#dc2626',
             kmlFiles: [...canonicalD11Files]
           });
         }
@@ -851,7 +881,7 @@ export default function App() {
       setDistricts(mergedDistricts);
 
       try {
-        localStorage.setItem('districts_data_v2', JSON.stringify(mergedDistricts));
+        localStorage.setItem('districts_data_v3', JSON.stringify(mergedDistricts));
       } catch (e) {}
 
       setTimeout(() => {
@@ -888,7 +918,7 @@ export default function App() {
 
       // 0. Always save to LocalStorage immediately so local session is never lost
       try {
-        localStorage.setItem('districts_data_v2', JSON.stringify(cleanDistricts));
+        localStorage.setItem('districts_data_v3', JSON.stringify(cleanDistricts));
         if (mainKmlText) {
           localStorage.setItem('persisted_kml_content', mainKmlText);
         }
@@ -1371,6 +1401,78 @@ export default function App() {
     };
   };
 
+  // State for download notification toast
+  const [excelNotice, setExcelNotice] = useState<string | null>(null);
+
+  // Helper to extract clean sorted sections for any brigade from loaded map data or canonical list
+  const getBrigadeSections = (targetBrigadeNum: number): string[] => {
+    // 1. Check in dynamically active colorGroups from current map features
+    const group = colorGroups.find(g => {
+      const fn = g.friendlyName.toLowerCase();
+      const key = g.key.toLowerCase();
+      return fn.includes(`brigada ${targetBrigadeNum}`) || key.includes(`brigada-${targetBrigadeNum}`);
+    });
+
+    const secSet = new Set<string>();
+    if (group && group.features.length > 0) {
+      group.features.forEach(f => {
+        const s = getSeccionValue(f);
+        if (s) secSet.add(s);
+      });
+    }
+
+    if (secSet.size > 0) {
+      return Array.from(secSet).sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0));
+    }
+
+    // 2. Canonical 32 sections per brigade fallback
+    return targetBrigadeNum === 1
+      ? [...SECCIONES_BRIGADA_1].sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0))
+      : [...SECCIONES_BRIGADA_2].sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0));
+  };
+
+  // Handler to export and download the Excel file with Column 1 = Brigada 1 and Column 2 = Brigada 2
+  const handleDownloadExcel = () => {
+    try {
+      const b1 = getBrigadeSections(1);
+      const b2 = getBrigadeSections(2);
+
+      // Collect any additional brigades if the user uploaded extra layers
+      const additional = colorGroups
+        .filter(g => {
+          const fn = g.friendlyName.toLowerCase();
+          const key = g.key.toLowerCase();
+          return !fn.includes('brigada 1') && !key.includes('brigada-1') &&
+                 !fn.includes('brigada 2') && !key.includes('brigada-2');
+        })
+        .map(g => {
+          const sSet = new Set<string>();
+          g.features.forEach(f => {
+            const s = getSeccionValue(f);
+            if (s) sSet.add(s);
+          });
+          return {
+            name: g.friendlyName,
+            sections: Array.from(sSet).sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0))
+          };
+        })
+        .filter(g => g.sections.length > 0);
+
+      exportBrigadesToExcel({
+        brigade1Sections: b1,
+        brigade2Sections: b2,
+        districtName: 'Distrito 11 - Morelia',
+        additionalBrigades: additional
+      }, 'Brigadas_1_y_2_Secciones.xlsx');
+
+      setExcelNotice(`Descargado con éxito: Brigada 1 (${b1.length} secciones) y Brigada 2 (${b2.length} secciones)`);
+      setTimeout(() => setExcelNotice(null), 4500);
+    } catch (err) {
+      console.error('Error al generar Excel:', err);
+      setErrorMsg('No se pudo generar el archivo de Excel.');
+    }
+  };
+
   const metrics = selectedFeature ? calculateFeatureMetrics(selectedFeature) : null;
   const isAdmin = currentUser && [
     'hugocesarlemuscortes@gmail.com'
@@ -1469,6 +1571,18 @@ export default function App() {
         
         {/* Google Authentication & Save Changes Button */}
         <div className="flex items-center space-x-2 sm:space-x-3">
+          {/* Botón Descargar Excel con Brigada 1 y 2 */}
+          <button
+            onClick={handleDownloadExcel}
+            id="download-excel-header-btn"
+            className="px-2.5 sm:px-3 py-1.5 rounded-xl font-bold text-xs flex items-center space-x-1.5 border border-emerald-500/50 bg-emerald-950/50 hover:bg-emerald-600 text-emerald-300 hover:text-white transition shadow-sm cursor-pointer select-none active:scale-[0.98]"
+            title="Descargar archivo Excel con Brigada 1 (Columna 1) y Brigada 2 (Columna 2)"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400 group-hover:text-white" />
+            <span className="hidden sm:inline">Descargar Excel</span>
+            <span className="sm:hidden">Excel</span>
+          </button>
+
           {isAdmin && (
             <button
               onClick={saveKmlToServer}
@@ -1643,17 +1757,27 @@ export default function App() {
                           </div>
                         </div>
 
-                        <button
-                          onClick={() => {
-                            setTargetDistrictId(dist.id);
-                            triggerFileSelect();
-                          }}
-                          className="px-2 py-1 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 rounded-lg text-[10px] font-bold transition flex items-center space-x-1 cursor-pointer"
-                          title={`Subir archivo KML a ${dist.name}`}
-                        >
-                          <Upload className="w-3 h-3" />
-                          <span>+ Subir KML</span>
-                        </button>
+                        <div className="flex items-center space-x-1.5">
+                          <button
+                            onClick={handleDownloadExcel}
+                            className="px-2 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 rounded-lg text-[10px] font-bold transition flex items-center space-x-1 cursor-pointer"
+                            title="Descargar secciones de este distrito en Excel (.xlsx)"
+                          >
+                            <FileSpreadsheet className="w-3 h-3 text-emerald-400" />
+                            <span>Excel</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              setTargetDistrictId(dist.id);
+                              triggerFileSelect();
+                            }}
+                            className="px-2 py-1 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 rounded-lg text-[10px] font-bold transition flex items-center space-x-1 cursor-pointer"
+                            title={`Subir archivo KML a ${dist.name}`}
+                          >
+                            <Upload className="w-3 h-3" />
+                            <span>+ Subir KML</span>
+                          </button>
+                        </div>
                       </div>
 
                       {/* District KML Files List */}
@@ -1781,6 +1905,23 @@ export default function App() {
             </div>
           )}
 
+          {/* Excel Download Success Toast */}
+          {excelNotice && (
+            <div className="absolute top-4 right-4 z-[999] bg-emerald-950/95 border border-emerald-500 text-emerald-100 px-4 py-3 rounded-xl text-xs flex items-center space-x-2.5 shadow-2xl backdrop-blur-md animate-slideDown">
+              <FileSpreadsheet className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+              <div>
+                <p className="font-bold text-emerald-200">¡Excel descargado con éxito!</p>
+                <p className="text-[11px] text-emerald-300/90">{excelNotice}</p>
+              </div>
+              <button 
+                onClick={() => setExcelNotice(null)}
+                className="ml-2 text-emerald-400 hover:text-white font-bold text-sm px-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           {/* FLOATING TOP-LEFT COLOR ZONES & SECTIONS WIDGET */}
           {activeFeatures.length > 0 && (
             <div 
@@ -1831,37 +1972,52 @@ export default function App() {
                 {/* Collapsible Body with Smooth Transition */}
                 <div className={`transition-all duration-300 overflow-hidden ${isColorWidgetCollapsed ? 'max-h-0 mt-0 opacity-0' : 'max-h-[350px] sm:max-h-[420px] mt-2 pt-2 border-t border-slate-800 opacity-100'}`}>
                   {selectedColorGroup === null ? (
-                    // List of existing color zones
-                    <div className="grid grid-cols-1 gap-1 sm:gap-2 max-h-52 overflow-y-auto custom-scrollbar pr-0.5">
-                      {colorGroups.map(group => {
-                        return (
-                          <button
-                            key={group.key}
-                            onClick={() => {
-                              setSelectedColorGroup(group.key);
-                              setGroupSearchQuery('');
-                            }}
-                            className="w-full flex items-center justify-between p-1.5 sm:p-2 rounded-lg sm:rounded-xl border border-slate-800 hover:border-slate-700 bg-slate-900/50 hover:bg-slate-900 transition text-left group cursor-pointer"
-                          >
-                            <div className="flex items-center space-x-1.5 sm:space-x-2.5 min-w-0">
-                              <span 
-                                className="w-2.5 h-2.5 sm:w-3.5 h-3.5 rounded-full border border-white/20 flex-shrink-0 shadow-sm"
-                                style={{ backgroundColor: group.color }}
-                              />
-                              <div className="min-w-0">
-                                <p className="text-[10px] sm:text-xs font-semibold text-slate-200 group-hover:text-white truncate">
-                                  {group.friendlyName}
-                                </p>
-                                <p className="text-[8px] sm:text-[10px] text-slate-400 leading-none mt-0.5">
-                                  {group.features.length} {group.features.length === 1 ? 'sección' : 'secciones'}
-                                </p>
+                    <>
+                      {/* List of existing color zones */}
+                      <div className="grid grid-cols-1 gap-1 sm:gap-2 max-h-52 overflow-y-auto custom-scrollbar pr-0.5">
+                        {colorGroups.map(group => {
+                          return (
+                            <button
+                              key={group.key}
+                              onClick={() => {
+                                setSelectedColorGroup(group.key);
+                                setGroupSearchQuery('');
+                              }}
+                              className="w-full flex items-center justify-between p-1.5 sm:p-2 rounded-lg sm:rounded-xl border border-slate-800 hover:border-slate-700 bg-slate-900/50 hover:bg-slate-900 transition text-left group cursor-pointer"
+                            >
+                              <div className="flex items-center space-x-1.5 sm:space-x-2.5 min-w-0">
+                                <span 
+                                  className="w-2.5 h-2.5 sm:w-3.5 h-3.5 rounded-full border border-white/20 flex-shrink-0 shadow-sm"
+                                  style={{ backgroundColor: group.color }}
+                                />
+                                <div className="min-w-0">
+                                  <p className="text-[10px] sm:text-xs font-semibold text-slate-200 group-hover:text-white truncate">
+                                    {group.friendlyName}
+                                  </p>
+                                  <p className="text-[8px] sm:text-[10px] text-slate-400 leading-none mt-0.5">
+                                    {group.features.length} {group.features.length === 1 ? 'sección' : 'secciones'}
+                                  </p>
+                                </div>
                               </div>
-                            </div>
-                            <ChevronRight className="w-3 h-3 sm:w-3.5 h-3.5 text-slate-500 group-hover:text-slate-300 transition" />
-                          </button>
-                        );
-                      })}
-                    </div>
+                              <ChevronRight className="w-3 h-3 sm:w-3.5 h-3.5 text-slate-500 group-hover:text-slate-300 transition" />
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Botón Descargar Excel dentro del widget de brigadas */}
+                      <div className="pt-2 border-t border-slate-800/80 mt-1">
+                        <button
+                          onClick={handleDownloadExcel}
+                          id="download-excel-widget-btn"
+                          className="w-full py-1.5 px-2 bg-emerald-950/70 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-700/60 hover:border-emerald-500 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer shadow-sm select-none active:scale-[0.98]"
+                          title="Descargar archivo Excel con Brigada 1 y Brigada 2 con sus secciones"
+                        >
+                          <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400 group-hover:text-white" />
+                          <span>Descargar en Excel (.xlsx)</span>
+                        </button>
+                      </div>
+                    </>
                   ) : (
                     // Expanded Color Group Detail with sections dropdown list
                     <div className="flex flex-col space-y-1.5 sm:space-y-2">
@@ -2191,20 +2347,24 @@ export default function App() {
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-300">2. Asignar a Brigada:</label>
               <div className="grid grid-cols-3 gap-1.5">
-                {['Brigada 1', 'Brigada 2', 'Brigada 3', 'Brigada 4', 'Brigada 5', 'General'].map(bName => (
+                {[
+                  { id: 'Brigada 1', label: 'Brigada 1 (Rojo)' },
+                  { id: 'Brigada 2', label: 'Brigada 2 (Azul)' },
+                  { id: 'General', label: 'General' }
+                ].map(b => (
                   <button
-                    key={bName}
+                    key={b.id}
                     onClick={() => {
-                      setTargetBrigade(bName);
+                      setTargetBrigade(b.id);
                       setCustomBrigadeInput('');
                     }}
-                    className={`py-2 px-2 rounded-lg border text-[10px] font-bold transition text-center cursor-pointer ${
-                      targetBrigade === bName && !customBrigadeInput 
+                    className={`py-2 px-2 rounded-lg border text-[11px] font-bold transition text-center cursor-pointer ${
+                      targetBrigade === b.id && !customBrigadeInput 
                         ? 'bg-blue-600 text-white border-blue-500' 
                         : 'bg-slate-950 text-slate-400 border-slate-850 hover:text-slate-200'
                     }`}
                   >
-                    {bName}
+                    {b.label}
                   </button>
                 ))}
               </div>
