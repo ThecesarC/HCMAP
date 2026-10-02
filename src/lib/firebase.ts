@@ -22,9 +22,10 @@ export const db = firebaseConfig.firestoreDatabaseId
  * @param kmlText KML file contents
  * @param userEmail Email of the user performing the save
  */
-export async function saveKmlToFirestore(kmlText: string, userEmail: string, districtsData?: any): Promise<void> {
+export async function saveKmlToFirestore(kmlText: string, userEmail: string, districtsData?: any, customTimestamp?: number): Promise<void> {
   // 1. Determine previous number of chunks to clean up excess
   let prevNumChunks = 0;
+  let prevNumDistrictsChunks = 0;
   try {
     const prevDocSnap = await getDoc(doc(db, "kml_data", "current"));
     if (prevDocSnap.exists()) {
@@ -32,6 +33,7 @@ export async function saveKmlToFirestore(kmlText: string, userEmail: string, dis
       if (prevData.isChunked) {
         prevNumChunks = prevData.numChunks || 0;
       }
+      prevNumDistrictsChunks = prevData.numDistrictsChunks || 0;
     }
   } catch (err) {
     console.warn("Could not read previous metadata for cleanup:", err);
@@ -85,23 +87,32 @@ export async function saveKmlToFirestore(kmlText: string, userEmail: string, dis
     await Promise.all(distPromises);
   }
 
-  // 5. Save metadata document
+  // 5. Save metadata document with explicit millisecond timestamp
+  const ts = customTimestamp || Date.now();
   const docRef = doc(db, "kml_data", "current");
   await setDoc(docRef, {
     isChunked: true,
     numChunks,
     numDistrictsChunks,
-    updatedAt: new Date().toISOString(),
+    updatedAt: new Date(ts).toISOString(),
+    updatedAtMs: ts,
     updatedBy: userEmail,
     districtsJson: (cleanDistrictsJson && cleanDistrictsJson.length < 300000) ? cleanDistrictsJson : null
   });
 
   // 6. Clean up any excess old chunks if the new KML has fewer chunks
+  const deletePromises: Promise<void>[] = [];
   if (prevNumChunks > numChunks) {
-    const deletePromises = [];
     for (let i = numChunks; i < prevNumChunks; i++) {
       deletePromises.push(deleteDoc(doc(db, "kml_data", `chunk_${i}`)));
     }
+  }
+  if (prevNumDistrictsChunks > numDistrictsChunks) {
+    for (let i = numDistrictsChunks; i < prevNumDistrictsChunks; i++) {
+      deletePromises.push(deleteDoc(doc(db, "kml_data", `districts_chunk_${i}`)));
+    }
+  }
+  if (deletePromises.length > 0) {
     try {
       await Promise.all(deletePromises);
     } catch (delErr) {
@@ -113,6 +124,7 @@ export async function saveKmlToFirestore(kmlText: string, userEmail: string, dis
 export interface FirestoreKmlResult {
   kmlText: string | null;
   districtsData: any | null;
+  updatedAtMs?: number;
 }
 
 /**
@@ -126,6 +138,7 @@ export async function getKmlFromFirestore(): Promise<FirestoreKmlResult | null> 
       const data = docSnap.data();
       let districtsData = null;
       let districtsJsonStr: string | null = data.districtsJson || null;
+      const updatedAtMs = data.updatedAtMs || (data.updatedAt ? new Date(data.updatedAt).getTime() : 0);
 
       // If districtsJson was chunked, reconstruct it
       if (!districtsJsonStr && data.numDistrictsChunks) {
@@ -172,7 +185,7 @@ export async function getKmlFromFirestore(): Promise<FirestoreKmlResult | null> 
         kmlText = data.kmlText || null;
       }
 
-      return { kmlText, districtsData };
+      return { kmlText, districtsData, updatedAtMs };
     }
     return null;
   } catch (error) {

@@ -522,7 +522,21 @@ export default function App() {
       try {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const filtered = parsed.filter((d: any) => d.id !== 'distrito-8' && !d.name.includes('Distrito 8'));
+          const filtered = parsed
+            .filter((d: any) => d.id !== 'distrito-8' && !d.name.includes('Distrito 8'))
+            .map((d: any) => ({
+              ...d,
+              kmlFiles: (d.kmlFiles || []).map((f: any) => {
+                if (f.kmlText && !f.kmlDoc) {
+                  try {
+                    return { ...f, kmlDoc: parseKml(f.kmlText) };
+                  } catch (e) {
+                    return f;
+                  }
+                }
+                return f;
+              })
+            }));
           if (filtered.length > 0) return filtered;
         }
       } catch (e) {
@@ -668,23 +682,20 @@ export default function App() {
         uploadedAt: new Date().toLocaleDateString('es-MX')
       };
 
-      let newDistrictsList: District[] = [];
-
-      setDistricts(prev => {
-        newDistrictsList = prev.map(dist => {
-          if (dist.id === districtId) {
-            // Check if file with same name already exists to avoid duplicate entries
-            const existing = dist.kmlFiles.filter(f => f.name !== newFile.name);
-            return {
-              ...dist,
-              enabled: true, // Auto-activate district on upload
-              kmlFiles: [...existing, newFile]
-            };
-          }
-          return dist;
-        });
-        return newDistrictsList;
+      const newDistrictsList = districts.map(dist => {
+        if (dist.id === districtId) {
+          // Check if file with same name already exists to avoid duplicate entries
+          const existing = dist.kmlFiles.filter(f => f.name !== newFile.name);
+          return {
+            ...dist,
+            enabled: true, // Auto-activate district on upload
+            kmlFiles: [...existing, newFile]
+          };
+        }
+        return dist;
       });
+
+      setDistricts(newDistrictsList);
 
       // Trigger map bounds fit
       setTimeout(() => {
@@ -699,40 +710,33 @@ export default function App() {
     }
   };
 
-  // Load default sample or persisted KML on mount into Districts
+  // Load persisted KML and Districts on mount
   useEffect(() => {
     const initKml = async () => {
       let serverDistrictsData: District[] | null = null;
-      let serverKmlText: string | null = null;
+      let serverUpdatedAt = 0;
 
-      // 1. Fetch official Districts and KML from server (/api/districts & /api/kml)
+      // 1. Fetch official Districts from server (/api/districts)
       try {
         const resDist = await fetch('/api/districts');
         const dataDist = await resDist.json();
-        if (dataDist.success && Array.isArray(dataDist.districts) && dataDist.districts.length > 0) {
+        if (dataDist.success && Array.isArray(dataDist.districts)) {
           serverDistrictsData = dataDist.districts;
+          serverUpdatedAt = dataDist.updatedAt || 0;
         }
       } catch (err) {
         console.warn("Could not fetch districts from local API server:", err);
       }
 
-      try {
-        const resKml = await fetch('/api/kml');
-        const dataKml = await resKml.json();
-        if (dataKml.success && dataKml.kml && !isFakeKml(dataKml.kml)) {
-          serverKmlText = dataKml.kml;
-        }
-      } catch (err) {
-        console.warn("Error fetching KML from local API server:", err);
-      }
-
       // 2. Try loading persisted data from Firestore
-      let firestoreResult: { kmlText: string | null; districtsData: any | null } | null = null;
+      let firestoreDistrictsData: District[] | null = null;
+      let firestoreUpdatedAt = 0;
       try {
         console.log("Intentando cargar KML y Distritos desde Firebase Firestore...");
         const res = await getKmlFromFirestore();
-        if (res) {
-          firestoreResult = res;
+        if (res && res.districtsData && Array.isArray(res.districtsData)) {
+          firestoreDistrictsData = res.districtsData;
+          firestoreUpdatedAt = res.updatedAtMs || 0;
         }
       } catch (fErr: any) {
         console.warn("No se pudo conectar a Firestore:", fErr);
@@ -741,57 +745,18 @@ export default function App() {
 
       // 3. Load from localStorage fallback
       let localDistrictsData: District[] | null = null;
+      let localUpdatedAt = 0;
       const savedLocal = localStorage.getItem('districts_data_v3');
       if (savedLocal) {
         try {
           const parsed = JSON.parse(savedLocal);
           if (Array.isArray(parsed) && parsed.length > 0) {
             localDistrictsData = parsed;
+            localUpdatedAt = parseInt(localStorage.getItem('districts_updated_at') || '0', 10) || 0;
           }
         } catch (e) {
           console.warn("Could not parse local districts:", e);
         }
-      }
-
-      // Canonical D11 default files (Brigada 1 and Brigada 2)
-      const canonicalD11Files: DistrictKmlFile[] = [];
-      try {
-        if (brigada1KmlText) {
-          canonicalD11Files.push({
-            id: 'd11-brigada1-kml',
-            name: 'BRIGADA 1 DT11.kml',
-            brigade: 'Brigada 1',
-            enabled: true,
-            kmlText: brigada1KmlText,
-            kmlDoc: parseKml(brigada1KmlText),
-            uploadedAt: new Date().toLocaleDateString('es-MX')
-          });
-        }
-        if (brigada2KmlText) {
-          canonicalD11Files.push({
-            id: 'd11-brigada2-kml',
-            name: 'BRIGADA 2 DT11.kml',
-            brigade: 'Brigada 2',
-            enabled: true,
-            kmlText: brigada2KmlText,
-            kmlDoc: parseKml(brigada2KmlText),
-            uploadedAt: new Date().toLocaleDateString('es-MX')
-          });
-        }
-      } catch (e) {
-        console.error("Error parsing default Brigada KMLs:", e);
-      }
-
-      // Merge source priority: Firestore > Server > LocalStorage
-      const candidateSources: District[][] = [];
-      if (firestoreResult?.districtsData && Array.isArray(firestoreResult.districtsData) && firestoreResult.districtsData.length > 0) {
-        candidateSources.push(firestoreResult.districtsData);
-      }
-      if (serverDistrictsData) {
-        candidateSources.push(serverDistrictsData);
-      }
-      if (localDistrictsData) {
-        candidateSources.push(localDistrictsData);
       }
 
       const processDistrictArray = (rawDistricts: any[]): District[] => {
@@ -814,74 +779,99 @@ export default function App() {
           }));
       };
 
-      let mergedDistricts: District[] = candidateSources.length > 0 
-        ? processDistrictArray(candidateSources[0])
-        : [
-            {
-              id: 'distrito-11',
-              name: 'Distrito 11',
-              description: 'Polígonos y secciones de Morelia distribuidos en 2 Brigadas por proximidad métrica',
-              enabled: true,
-              color: '#dc2626',
-              kmlFiles: [...canonicalD11Files]
-            }
-          ];
+      // Determine authoritative source based on most recent timestamp
+      type SourceCandidate = {
+        name: string;
+        data: District[];
+        updatedAt: number;
+        priority: number;
+      };
 
-      // Merge secondary sources so no user-uploaded file is lost, skipping obsolete brigades if 2-brigade setup is active
-      for (let s = 1; s < candidateSources.length; s++) {
-        const secondary = processDistrictArray(candidateSources[s]);
-        secondary.forEach(secDist => {
-          const targetDistIndex = mergedDistricts.findIndex(d => d.id === secDist.id);
-          if (targetDistIndex >= 0) {
-            const existingDist = mergedDistricts[targetDistIndex];
-            const hasBothBrigades = existingDist.kmlFiles.some(f => f.brigade === 'Brigada 1') && existingDist.kmlFiles.some(f => f.brigade === 'Brigada 2');
-            secDist.kmlFiles.forEach(secFile => {
-              // Avoid resurrecting obsolete brigades 3, 4, 5
-              if (hasBothBrigades && ['Brigada 3', 'Brigada 4', 'Brigada 5'].includes(secFile.brigade || '')) {
-                return;
-              }
-              const fileExists = existingDist.kmlFiles.some(f => f.name === secFile.name || f.id === secFile.id);
-              if (!fileExists) {
-                existingDist.kmlFiles.push(secFile);
-              }
-            });
-          } else {
-            mergedDistricts.push(secDist);
-          }
-        });
+      const sources: SourceCandidate[] = [];
+      if (firestoreDistrictsData && firestoreDistrictsData.length > 0) {
+        sources.push({ name: 'firestore', data: firestoreDistrictsData, updatedAt: firestoreUpdatedAt, priority: 3 });
+      }
+      if (serverDistrictsData && serverDistrictsData.length > 0) {
+        sources.push({ name: 'server', data: serverDistrictsData, updatedAt: serverUpdatedAt, priority: 2 });
+      }
+      if (localDistrictsData && localDistrictsData.length > 0) {
+        sources.push({ name: 'local', data: localDistrictsData, updatedAt: localUpdatedAt, priority: 1 });
       }
 
-      // Ensure Distrito 11 includes canonicalD11Files if missing
-      const d11Idx = mergedDistricts.findIndex(d => d.id === 'distrito-11');
-      if (canonicalD11Files.length > 0) {
-        if (d11Idx >= 0) {
-          const d11 = mergedDistricts[d11Idx];
-          if (!d11.kmlFiles || d11.kmlFiles.length === 0) {
-            d11.kmlFiles = [...canonicalD11Files];
-          } else {
-            canonicalD11Files.forEach(cFile => {
-              const hasCanonical = d11.kmlFiles.some(f => f.name === cFile.name || f.id === cFile.id);
-              if (!hasCanonical) {
-                d11.kmlFiles.push(cFile);
-              }
+      // Sort descending by timestamp; if equal, by priority (Firestore > Server > Local)
+      sources.sort((a, b) => {
+        if (b.updatedAt !== a.updatedAt) {
+          return b.updatedAt - a.updatedAt;
+        }
+        return b.priority - a.priority;
+      });
+
+      let finalDistricts: District[];
+
+      if (sources.length > 0) {
+        // Use the authoritative source DIRECTLY!
+        // DO NOT merge secondary sources, which was the bug resurrecting deleted files!
+        const chosen = sources[0];
+        console.log(`Cargando distritos desde fuente autoritativa: ${chosen.name} (timestamp: ${chosen.updatedAt})`);
+        finalDistricts = processDistrictArray(chosen.data);
+      } else {
+        // Fresh start with no saved data anywhere: initialize default canonical files
+        console.log("Inicializando con archivos KML canónicos de muestra por defecto...");
+        const canonicalD11Files: DistrictKmlFile[] = [];
+        try {
+          if (brigada1KmlText) {
+            canonicalD11Files.push({
+              id: 'd11-brigada1-kml',
+              name: 'BRIGADA 1 DT11.kml',
+              brigade: 'Brigada 1',
+              enabled: true,
+              kmlText: brigada1KmlText,
+              kmlDoc: parseKml(brigada1KmlText),
+              uploadedAt: new Date().toLocaleDateString('es-MX')
             });
           }
-        } else {
-          mergedDistricts.unshift({
+          if (brigada2KmlText) {
+            canonicalD11Files.push({
+              id: 'd11-brigada2-kml',
+              name: 'BRIGADA 2 DT11.kml',
+              brigade: 'Brigada 2',
+              enabled: true,
+              kmlText: brigada2KmlText,
+              kmlDoc: parseKml(brigada2KmlText),
+              uploadedAt: new Date().toLocaleDateString('es-MX')
+            });
+          }
+        } catch (e) {
+          console.error("Error parsing default Brigada KMLs:", e);
+        }
+
+        finalDistricts = [
+          {
             id: 'distrito-11',
             name: 'Distrito 11',
             description: 'Polígonos y secciones de Morelia distribuidos en 2 Brigadas por proximidad métrica',
             enabled: true,
             color: '#dc2626',
-            kmlFiles: [...canonicalD11Files]
-          });
-        }
+            kmlFiles: canonicalD11Files
+          }
+        ];
       }
 
-      setDistricts(mergedDistricts);
+      setDistricts(finalDistricts);
 
+      // Synchronize LocalStorage with authoritative source
       try {
-        localStorage.setItem('districts_data_v3', JSON.stringify(mergedDistricts));
+        const clean = finalDistricts.map(d => ({
+          ...d,
+          kmlFiles: (d.kmlFiles || []).map(f => {
+            const { kmlDoc, ...rest } = f;
+            return rest;
+          })
+        }));
+        localStorage.setItem('districts_data_v3', JSON.stringify(clean));
+        if (sources.length > 0 && sources[0].updatedAt) {
+          localStorage.setItem('districts_updated_at', sources[0].updatedAt.toString());
+        }
       } catch (e) {}
 
       setTimeout(() => {
@@ -896,6 +886,8 @@ export default function App() {
     setIsSavingToServer(true);
     setServerSaveMessage(null);
     try {
+      const now = Date.now();
+
       // Clean districts data by stripping heavy parsed kmlDoc DOM objects
       const cleanDistricts = districts.map(d => ({
         ...d,
@@ -919,6 +911,8 @@ export default function App() {
       // 0. Always save to LocalStorage immediately so local session is never lost
       try {
         localStorage.setItem('districts_data_v3', JSON.stringify(cleanDistricts));
+        localStorage.setItem('districts_updated_at', now.toString());
+        localStorage.setItem('app_has_custom_config', 'true');
         if (mainKmlText) {
           localStorage.setItem('persisted_kml_content', mainKmlText);
         }
@@ -934,7 +928,7 @@ export default function App() {
           const res = await fetch('/api/districts', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ districts: cleanDistricts, kmlText: mainKmlText }),
+            body: JSON.stringify({ districts: cleanDistricts, kmlText: mainKmlText, updatedAt: now }),
             signal: controller.signal
           });
           clearTimeout(timeoutId);
@@ -953,7 +947,7 @@ export default function App() {
             setTimeout(() => reject(new Error("Firestore timeout")), 4000)
           );
           await Promise.race([
-            saveKmlToFirestore(mainKmlText, currentUser?.email || 'admin', cleanDistricts),
+            saveKmlToFirestore(mainKmlText, currentUser?.email || 'admin', cleanDistricts, now),
             timeout
           ]);
           return true;
@@ -1066,7 +1060,7 @@ export default function App() {
   };
 
   const deleteKmlFile = (districtId: string, fileId: string) => {
-    setDistricts(prev => prev.map(d => {
+    const updated = districts.map(d => {
       if (d.id === districtId) {
         return {
           ...d,
@@ -1074,7 +1068,42 @@ export default function App() {
         };
       }
       return d;
+    });
+
+    setDistricts(updated);
+
+    const now = Date.now();
+    const clean = updated.map(d => ({
+      ...d,
+      kmlFiles: (d.kmlFiles || []).map(f => {
+        const { kmlDoc, ...rest } = f;
+        return rest;
+      })
     }));
+
+    // Update LocalStorage immediately
+    try {
+      localStorage.setItem('districts_data_v3', JSON.stringify(clean));
+      localStorage.setItem('districts_updated_at', now.toString());
+      localStorage.setItem('app_has_custom_config', 'true');
+    } catch (e) {
+      console.warn("LocalStorage save warning on delete:", e);
+    }
+
+    // Auto-sync deletion to server in background so server never retains the deleted file
+    try {
+      const texts: string[] = [];
+      clean.forEach(d => {
+        d.kmlFiles.forEach(f => {
+          if (f.kmlText) texts.push(f.kmlText);
+        });
+      });
+      fetch('/api/districts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ districts: clean, kmlText: texts.join('\n\n'), updatedAt: now })
+      }).catch(sErr => console.warn("Auto-sync delete to server skipped:", sErr));
+    } catch (e) {}
   };
 
   const handleCreateDistrict = () => {
@@ -1124,32 +1153,53 @@ export default function App() {
       finalBrigade
     );
 
-    if (result.success && result.updatedDistricts) {
+    if (result.success && result.updatedDistricts && result.updatedDistricts.length > 0) {
       setUploadModalOpen(false);
       setPendingKmlText(null);
       setCustomBrigadeInput('');
 
+      const cleanDistricts = result.updatedDistricts.map(d => ({
+        ...d,
+        kmlFiles: (d.kmlFiles || []).map(f => {
+          const { kmlDoc, ...rest } = f;
+          return rest;
+        })
+      }));
+
       // Gather all active KML texts across districts to build a complete combined text
       const allKmlTexts: string[] = [];
-      result.updatedDistricts.forEach(d => {
+      cleanDistricts.forEach(d => {
         d.kmlFiles.forEach(f => {
           if (f.kmlText) allKmlTexts.push(f.kmlText);
         });
       });
       const combinedText = allKmlTexts.length > 0 ? allKmlTexts.join('\n\n') : pendingKmlText;
+      const now = Date.now();
+
+      // Immediately save to LocalStorage with timestamp
+      try {
+        localStorage.setItem('districts_data_v3', JSON.stringify(cleanDistricts));
+        localStorage.setItem('districts_updated_at', now.toString());
+        localStorage.setItem('app_has_custom_config', 'true');
+        if (combinedText) {
+          localStorage.setItem('persisted_kml_content', combinedText);
+        }
+      } catch (lErr) {
+        console.warn("LocalStorage save warning on upload:", lErr);
+      }
 
       try {
         await fetch('/api/districts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ districts: result.updatedDistricts, kmlText: combinedText })
+          body: JSON.stringify({ districts: cleanDistricts, kmlText: combinedText, updatedAt: now })
         });
       } catch (sErr) {
         console.warn("Auto-sync to server skipped:", sErr);
       }
 
       try {
-        await saveKmlToFirestore(combinedText, currentUser?.email || 'bunkerhrv@gmail.com', result.updatedDistricts);
+        await saveKmlToFirestore(combinedText, currentUser?.email || 'bunkerhrv@gmail.com', cleanDistricts, now);
         console.log("¡KML y estructura de Distritos guardados exitosamente en Firestore!");
       } catch (err) {
         console.warn("Auto-sync to Firestore skipped/limited:", err);

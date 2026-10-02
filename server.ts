@@ -21,15 +21,20 @@ async function startServer() {
       if (fs.existsSync(districtsFilePath)) {
         const districtsRaw = fs.readFileSync(districtsFilePath, "utf-8");
         const parsed = JSON.parse(districtsRaw);
+        const districts = Array.isArray(parsed) ? parsed : (parsed.districts || []);
+        const stat = fs.statSync(districtsFilePath);
+        const updatedAt = (!Array.isArray(parsed) && parsed.updatedAt) ? parsed.updatedAt : Math.floor(stat.mtimeMs);
         return res.json({ 
           success: true, 
-          districts: parsed,
+          districts: districts,
+          updatedAt: updatedAt,
           source: "server_storage"
         });
       } else {
         return res.json({ 
           success: false, 
           districts: null,
+          updatedAt: 0,
           message: "No hay distritos guardados en el servidor aún."
         });
       }
@@ -42,7 +47,7 @@ async function startServer() {
   // API Route: Persist Districts structure in server
   app.post("/api/districts", (req, res) => {
     try {
-      const { districts, kmlText } = req.body;
+      const { districts, kmlText, updatedAt } = req.body;
       if (!districts || !Array.isArray(districts)) {
         return res.status(400).json({ success: false, error: "El cuerpo debe contener 'districts' como array." });
       }
@@ -52,8 +57,13 @@ async function startServer() {
         fs.mkdirSync(dir, { recursive: true });
       }
 
-      // Save districts.json
-      fs.writeFileSync(districtsFilePath, JSON.stringify(districts, null, 2), "utf-8");
+      const savePayload = {
+        districts,
+        updatedAt: updatedAt || Date.now()
+      };
+
+      // Save districts.json with timestamp
+      fs.writeFileSync(districtsFilePath, JSON.stringify(savePayload, null, 2), "utf-8");
 
       // Save combined current.kml if provided or extract from districts
       let mainKmlText = kmlText;
@@ -72,7 +82,7 @@ async function startServer() {
       }
 
       console.log("Distritos y KML guardados en servidor:", districtsFilePath);
-      return res.json({ success: true, message: "Distritos guardados permanentemente en servidor." });
+      return res.json({ success: true, message: "Distritos guardados permanentemente en servidor.", updatedAt: savePayload.updatedAt });
     } catch (error: any) {
       console.error("Error writing districts:", error);
       return res.status(500).json({ success: false, error: error.message });
