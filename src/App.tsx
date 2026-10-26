@@ -784,7 +784,21 @@ export default function App() {
           }));
       };
 
-      // Determine authoritative source based on most recent timestamp
+      // Helper to detect unedited default seed template
+      const isDefaultTemplate = (dList: any[] | null | undefined): boolean => {
+        if (!dList || dList.length === 0) return true;
+        if (dList.length === 1 && (dList[0].id === 'distrito-11' || dList[0].name === 'Distrito 11')) {
+          const files = dList[0].kmlFiles || [];
+          if (files.length === 2 && 
+              files.some((f: any) => f.name && f.name.includes('BRIGADA 1 DT11')) && 
+              files.some((f: any) => f.name && f.name.includes('BRIGADA 2 DT11'))) {
+            return true;
+          }
+        }
+        return false;
+      };
+
+      // Determine authoritative source based on most recent timestamp & cloud priority
       type SourceCandidate = {
         name: string;
         data: District[];
@@ -794,13 +808,31 @@ export default function App() {
 
       const sources: SourceCandidate[] = [];
       if (firestoreDistrictsData && firestoreDistrictsData.length > 0) {
-        sources.push({ name: 'firestore', data: firestoreDistrictsData, updatedAt: firestoreUpdatedAt, priority: 3 });
+        const isDefault = isDefaultTemplate(firestoreDistrictsData);
+        sources.push({ 
+          name: 'firestore', 
+          data: firestoreDistrictsData, 
+          updatedAt: isDefault ? 0 : (firestoreUpdatedAt || 1), 
+          priority: isDefault ? 1 : 10 
+        });
       }
       if (serverDistrictsData && serverDistrictsData.length > 0) {
-        sources.push({ name: 'server', data: serverDistrictsData, updatedAt: serverUpdatedAt, priority: 2 });
+        const isDefault = isDefaultTemplate(serverDistrictsData);
+        sources.push({ 
+          name: 'server', 
+          data: serverDistrictsData, 
+          updatedAt: isDefault ? 0 : serverUpdatedAt, 
+          priority: isDefault ? 0 : 5 
+        });
       }
       if (localDistrictsData && localDistrictsData.length > 0) {
-        sources.push({ name: 'local', data: localDistrictsData, updatedAt: localUpdatedAt, priority: 1 });
+        const isDefault = isDefaultTemplate(localDistrictsData);
+        sources.push({ 
+          name: 'local', 
+          data: localDistrictsData, 
+          updatedAt: isDefault ? 0 : localUpdatedAt, 
+          priority: isDefault ? 0 : 2 
+        });
       }
 
       // Sort descending by timestamp; if equal, by priority (Firestore > Server > Local)
@@ -815,10 +847,29 @@ export default function App() {
 
       if (sources.length > 0) {
         // Use the authoritative source DIRECTLY!
-        // DO NOT merge secondary sources, which was the bug resurrecting deleted files!
         const chosen = sources[0];
         console.log(`Cargando distritos desde fuente autoritativa: ${chosen.name} (timestamp: ${chosen.updatedAt})`);
         finalDistricts = processDistrictArray(chosen.data);
+
+        // Keep local container storage in sync with authoritative cloud data
+        if (chosen.name === 'firestore') {
+          try {
+            fetch('/api/districts', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                districts: finalDistricts.map(d => ({
+                  ...d,
+                  kmlFiles: (d.kmlFiles || []).map(f => {
+                    const { kmlDoc, ...rest } = f;
+                    return rest;
+                  })
+                })),
+                updatedAt: chosen.updatedAt
+              })
+            }).catch(() => {});
+          } catch (e) {}
+        }
       } else {
         // Fresh start with no saved data anywhere: initialize default canonical files
         console.log("Inicializando con archivos KML canónicos de muestra por defecto...");
@@ -945,14 +996,14 @@ export default function App() {
         }
       })();
 
-      // 2. Save to Firebase Firestore with a 4-second timeout guard
+      // 2. Save to Firebase Firestore with a 15-second timeout guard
       const saveFirestorePromise = (async (): Promise<boolean> => {
         try {
           const timeout = new Promise<boolean>((_, reject) =>
-            setTimeout(() => reject(new Error("Firestore timeout")), 4000)
+            setTimeout(() => reject(new Error("Firestore timeout")), 15000)
           );
           await Promise.race([
-            saveKmlToFirestore(mainKmlText, currentUser?.email || 'admin', cleanDistricts, now),
+            saveKmlToFirestore(mainKmlText, currentUser?.email || 'bunkerhrv@gmail.com', cleanDistricts, now),
             timeout
           ]);
           return true;
@@ -966,15 +1017,25 @@ export default function App() {
       // Run both in parallel so one does not block the other
       const [serverSuccess, firestoreSuccess] = await Promise.all([saveServerPromise, saveFirestorePromise]);
 
-      if (serverSuccess || firestoreSuccess) {
+      if (firestoreSuccess && serverSuccess) {
         setServerSaveMessage({ 
           type: 'success', 
-          text: '¡Guardado con éxito! Todos los Distritos y Brigadas se publicaron correctamente.' 
+          text: '¡Guardado permanentemente en la nube (Firestore) y servidor!' 
+        });
+      } else if (firestoreSuccess) {
+        setServerSaveMessage({ 
+          type: 'success', 
+          text: '¡Guardado permanentemente en la nube (Firestore)!' 
+        });
+      } else if (serverSuccess) {
+        setServerSaveMessage({ 
+          type: 'success', 
+          text: 'Guardado en servidor local (atención: error de sincronización con Firestore).' 
         });
       } else {
         setServerSaveMessage({ 
           type: 'success', 
-          text: '¡Guardado correctamente en almacenamiento local!' 
+          text: 'Guardado en almacenamiento local del navegador.' 
         });
       }
     } catch (err: any) {
@@ -1095,7 +1156,7 @@ export default function App() {
       console.warn("LocalStorage save warning on delete:", e);
     }
 
-    // Auto-sync deletion to server in background so server never retains the deleted file
+    // Auto-sync deletion to server and Firestore in background so neither retains the deleted file
     try {
       const texts: string[] = [];
       clean.forEach(d => {
@@ -1108,6 +1169,10 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ districts: clean, kmlText: texts.join('\n\n'), updatedAt: now })
       }).catch(sErr => console.warn("Auto-sync delete to server skipped:", sErr));
+
+      saveKmlToFirestore(texts.join('\n\n'), currentUser?.email || 'bunkerhrv@gmail.com', clean, now)
+        .then(() => console.log("Eliminación sincronizada exitosamente con Firestore"))
+        .catch(fErr => console.warn("Auto-sync delete to Firestore skipped:", fErr));
     } catch (e) {}
   };
 

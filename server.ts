@@ -22,8 +22,8 @@ async function startServer() {
         const districtsRaw = fs.readFileSync(districtsFilePath, "utf-8");
         const parsed = JSON.parse(districtsRaw);
         const districts = Array.isArray(parsed) ? parsed : (parsed.districts || []);
-        const stat = fs.statSync(districtsFilePath);
-        const updatedAt = (!Array.isArray(parsed) && parsed.updatedAt) ? parsed.updatedAt : Math.floor(stat.mtimeMs);
+        // If parsed is a raw array or lacks explicit updatedAt number, it is the default seed file -> updatedAt = 0
+        const updatedAt = (!Array.isArray(parsed) && typeof parsed.updatedAt === 'number') ? parsed.updatedAt : 0;
         return res.json({ 
           success: true, 
           districts: districts,
