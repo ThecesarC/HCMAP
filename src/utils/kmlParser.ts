@@ -308,3 +308,92 @@ export function parseKml(kmlText: string): KmlDocument {
     styles,
   };
 }
+
+function escapeXml(unsafe: string): string {
+  if (!unsafe) return '';
+  return String(unsafe).replace(/[<>&'"]/g, (c) => {
+    switch (c) {
+      case '<': return '&lt;';
+      case '>': return '&gt;';
+      case '&': return '&amp;';
+      case '\'': return '&apos;';
+      case '"': return '&quot;';
+      default: return c;
+    }
+  });
+}
+
+/**
+ * Serializes a KmlDocument back into valid KML XML text.
+ */
+export function serializeKml(doc: KmlDocument): string {
+  const placemarks = (doc.features || []).map(f => {
+    let geomXml = '';
+    if (f.geometryType === 'Polygon' && f.polygons && f.polygons.length > 0) {
+      const polyXmls = f.polygons.map(polyPaths => {
+        const outer = polyPaths[0] || [];
+        const outerCoords = outer.map(pt => `${pt.lng},${pt.lat},0`).join('\n                ');
+        let innerXml = '';
+        for (let i = 1; i < polyPaths.length; i++) {
+          const innerCoords = polyPaths[i].map(pt => `${pt.lng},${pt.lat},0`).join('\n                ');
+          innerXml += `
+          <innerBoundaryIs>
+            <LinearRing>
+              <coordinates>
+                ${innerCoords}
+              </coordinates>
+            </LinearRing>
+          </innerBoundaryIs>`;
+        }
+        return `
+        <Polygon>
+          <outerBoundaryIs>
+            <LinearRing>
+              <tessellate>1</tessellate>
+              <coordinates>
+                ${outerCoords}
+              </coordinates>
+            </LinearRing>
+          </outerBoundaryIs>${innerXml}
+        </Polygon>`;
+      }).join('\n');
+      geomXml = polyXmls;
+    } else if (f.geometryType === 'LineString' && f.lineStrings && f.lineStrings.length > 0) {
+      geomXml = f.lineStrings.map(path => {
+        const coords = path.map(pt => `${pt.lng},${pt.lat},0`).join(' ');
+        return `
+        <LineString>
+          <coordinates>${coords}</coordinates>
+        </LineString>`;
+      }).join('\n');
+    } else if (f.geometryType === 'Point' && f.points && f.points.length > 0) {
+      geomXml = f.points.map(pt => `
+        <Point>
+          <coordinates>${pt.lng},${pt.lat},0</coordinates>
+        </Point>`).join('\n');
+    }
+
+    const propData = Object.entries(f.properties || {}).map(([k, v]) => `
+          <Data name="${escapeXml(k)}">
+            <value>${escapeXml(String(v))}</value>
+          </Data>`).join('');
+
+    return `      <Placemark>
+        <name>${escapeXml(f.name || 'Sin Nombre')}</name>
+        ${f.description ? `<description><![CDATA[${f.description}]]></description>` : '<description/>'}
+        ${propData ? `<ExtendedData>${propData}\n        </ExtendedData>` : ''}
+${geomXml}
+      </Placemark>`;
+  }).join('\n');
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>${escapeXml(doc.name || 'Capa KML')}</name>
+    <Folder>
+      <name>${escapeXml(doc.name || 'Secciones')}</name>
+${placemarks}
+    </Folder>
+  </Document>
+</kml>`;
+}

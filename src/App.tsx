@@ -44,13 +44,15 @@ import {
   Filter,
   Save,
   FileSpreadsheet,
-  Download
+  Download,
+  Settings2
 } from 'lucide-react';
-import { parseKml } from './utils/kmlParser';
+import { parseKml, serializeKml } from './utils/kmlParser';
 import { KmlDocument, KmlFeature, District, DistrictKmlFile, DistrictFeature } from './types';
 import { SAMPLES } from './data/samples';
 import { getKmlFromFirestore, saveKmlToFirestore } from './lib/firebase';
 import { exportBrigadesToExcel } from './utils/excelExport';
+import { LayerSectionModal } from './components/LayerSectionModal';
 import currentKmlText from './data/current.kml?raw';
 import brigada1KmlText from './data/brigada1.kml?raw';
 import brigada2KmlText from './data/brigada2.kml?raw';
@@ -569,6 +571,9 @@ export default function App() {
   const [targetDistrictId, setTargetDistrictId] = useState<string>('distrito-11');
   const [targetBrigade, setTargetBrigade] = useState<string>('Brigada 1');
   const [customBrigadeInput, setCustomBrigadeInput] = useState<string>('');
+
+  // Layer Section Editing Modal state (Admin)
+  const [editingLayerTarget, setEditingLayerTarget] = useState<{ districtId: string; fileId: string } | null>(null);
 
   // New District Creation Modal
   const [newDistrictModalOpen, setNewDistrictModalOpen] = useState(false);
@@ -1103,6 +1108,186 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ districts: clean, kmlText: texts.join('\n\n'), updatedAt: now })
       }).catch(sErr => console.warn("Auto-sync delete to server skipped:", sErr));
+    } catch (e) {}
+  };
+
+  const activeEditingDistrict = useMemo(() => {
+    if (!editingLayerTarget) return null;
+    return districts.find(d => d.id === editingLayerTarget.districtId) || null;
+  }, [districts, editingLayerTarget]);
+
+  const activeEditingFile = useMemo(() => {
+    if (!activeEditingDistrict || !editingLayerTarget) return null;
+    return activeEditingDistrict.kmlFiles.find(f => f.id === editingLayerTarget.fileId) || null;
+  }, [activeEditingDistrict, editingLayerTarget]);
+
+  // Global feature bank: collects geometries across raw files and active districts
+  const featureBank = useMemo(() => {
+    const bank = new Map<string, KmlFeature>();
+
+    const seedFromRaw = (rawText: string) => {
+      if (!rawText) return;
+      try {
+        const parsed = parseKml(rawText);
+        parsed.features.forEach(f => {
+          const sec = getSeccionValue(f);
+          if (sec && !bank.has(sec)) {
+            bank.set(sec, f);
+          }
+        });
+      } catch (e) {}
+    };
+
+    seedFromRaw(brigada1KmlText);
+    seedFromRaw(brigada2KmlText);
+    seedFromRaw(currentKmlText);
+
+    districts.forEach(d => {
+      d.kmlFiles.forEach(f => {
+        if (f.kmlDoc && Array.isArray(f.kmlDoc.features)) {
+          f.kmlDoc.features.forEach(feat => {
+            const sec = getSeccionValue(feat);
+            if (sec && !bank.has(sec)) {
+              bank.set(sec, feat);
+            }
+          });
+        }
+      });
+    });
+
+    return bank;
+  }, [districts]);
+
+  const handleUpdateFileInDistrict = (districtId: string, updatedFile: DistrictKmlFile) => {
+    const updatedDistricts = districts.map(d => {
+      if (d.id === districtId) {
+        return {
+          ...d,
+          kmlFiles: d.kmlFiles.map(f => f.id === updatedFile.id ? updatedFile : f)
+        };
+      }
+      return d;
+    });
+
+    setDistricts(updatedDistricts);
+
+    const now = Date.now();
+    const cleanDistricts = updatedDistricts.map(d => ({
+      ...d,
+      kmlFiles: (d.kmlFiles || []).map(f => {
+        const { kmlDoc, ...rest } = f;
+        return rest;
+      })
+    }));
+
+    try {
+      localStorage.setItem('districts_data_v3', JSON.stringify(cleanDistricts));
+      localStorage.setItem('districts_updated_at', now.toString());
+      localStorage.setItem('app_has_custom_config', 'true');
+    } catch (e) {}
+
+    // Auto-sync in background to server and Firestore
+    try {
+      const texts: string[] = [];
+      cleanDistricts.forEach(d => {
+        d.kmlFiles.forEach(f => { if (f.kmlText) texts.push(f.kmlText); });
+      });
+      fetch('/api/districts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ districts: cleanDistricts, kmlText: texts.join('\n\n'), updatedAt: now })
+      }).catch(err => console.warn("Background update sync warning:", err));
+
+      saveKmlToFirestore(texts.join('\n\n'), currentUser?.email || 'bunkerhrv@gmail.com', cleanDistricts, now)
+        .catch(fErr => console.warn("Firestore sync warning:", fErr));
+    } catch (e) {}
+  };
+
+  const handleMoveFeatureBetweenFiles = (
+    sourceDistrictId: string,
+    sourceFileId: string,
+    targetDistrictId: string,
+    targetFileId: string,
+    featureId: string
+  ) => {
+    const sourceDistrict = districts.find(d => d.id === sourceDistrictId);
+    const sourceFile = sourceDistrict?.kmlFiles.find(f => f.id === sourceFileId);
+
+    if (!sourceFile) return;
+
+    const featureToMove = sourceFile.kmlDoc?.features.find(f => f.id === featureId) || null;
+    if (!featureToMove) return;
+
+    const targetDistrict = districts.find(d => d.id === targetDistrictId);
+    const targetFile = targetDistrict?.kmlFiles.find(f => f.id === targetFileId);
+    if (!targetFile) return;
+
+    // Remove from source
+    const newSourceFeatures = sourceFile.kmlDoc.features.filter(f => f.id !== featureId);
+    const newSourceDoc = { ...sourceFile.kmlDoc, features: newSourceFeatures };
+    const newSourceFile: DistrictKmlFile = {
+      ...sourceFile,
+      kmlDoc: newSourceDoc,
+      kmlText: serializeKml(newSourceDoc)
+    };
+
+    // Add to target with cloned feature updating brigade tag
+    const movedFeature: KmlFeature = {
+      ...featureToMove,
+      properties: {
+        ...(featureToMove.properties || {}),
+        BRIGADA: targetFile.brigade
+      }
+    };
+    const newTargetFeatures = [...(targetFile.kmlDoc?.features || []), movedFeature];
+    const newTargetDoc = { ...targetFile.kmlDoc, features: newTargetFeatures };
+    const newTargetFile: DistrictKmlFile = {
+      ...targetFile,
+      kmlDoc: newTargetDoc,
+      kmlText: serializeKml(newTargetDoc)
+    };
+
+    const updatedDistricts = districts.map(d => {
+      let files = d.kmlFiles;
+      if (d.id === sourceDistrictId) {
+        files = files.map(f => f.id === sourceFileId ? newSourceFile : f);
+      }
+      if (d.id === targetDistrictId) {
+        files = files.map(f => f.id === targetFileId ? newTargetFile : f);
+      }
+      return { ...d, kmlFiles: files };
+    });
+
+    setDistricts(updatedDistricts);
+
+    const now = Date.now();
+    const cleanDistricts = updatedDistricts.map(d => ({
+      ...d,
+      kmlFiles: (d.kmlFiles || []).map(f => {
+        const { kmlDoc, ...rest } = f;
+        return rest;
+      })
+    }));
+
+    try {
+      localStorage.setItem('districts_data_v3', JSON.stringify(cleanDistricts));
+      localStorage.setItem('districts_updated_at', now.toString());
+      localStorage.setItem('app_has_custom_config', 'true');
+    } catch (e) {}
+
+    try {
+      const texts: string[] = [];
+      cleanDistricts.forEach(d => {
+        d.kmlFiles.forEach(f => { if (f.kmlText) texts.push(f.kmlText); });
+      });
+      fetch('/api/districts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ districts: cleanDistricts, kmlText: texts.join('\n\n'), updatedAt: now })
+      }).catch(err => console.warn("Background move sync warning:", err));
+
+      saveKmlToFirestore(texts.join('\n\n'), currentUser?.email || 'bunkerhrv@gmail.com', cleanDistricts, now)
+        .catch(fErr => console.warn("Firestore sync warning:", fErr));
     } catch (e) {}
   };
 
@@ -1850,13 +2035,13 @@ export default function App() {
                           dist.kmlFiles.map(file => (
                             <div 
                               key={file.id}
-                              className={`p-2 rounded-lg border text-xs flex items-center justify-between transition ${
+                              className={`p-2 rounded-xl border text-xs flex items-center justify-between transition gap-2 ${
                                 file.enabled 
-                                  ? 'bg-slate-900/90 border-slate-800 text-slate-200' 
+                                  ? 'bg-slate-900/90 border-slate-800 text-slate-200 hover:border-slate-700' 
                                   : 'bg-slate-950/60 border-slate-900 text-slate-500 line-through'
                               }`}
                             >
-                              <div className="flex items-center space-x-2 min-w-0 pr-2">
+                              <div className="flex items-center space-x-2 min-w-0 flex-1">
                                 <button
                                   onClick={() => toggleKmlFile(dist.id, file.id)}
                                   className="text-slate-400 hover:text-blue-400 transition flex-shrink-0 cursor-pointer"
@@ -1864,26 +2049,44 @@ export default function App() {
                                 >
                                   {file.enabled ? <Eye className="w-3.5 h-3.5 text-blue-400" /> : <EyeOff className="w-3.5 h-3.5 text-slate-600" />}
                                 </button>
-                                <div className="min-w-0">
-                                  <p className="font-semibold text-[11px] truncate">{file.name}</p>
+                                
+                                <div 
+                                  onClick={() => setEditingLayerTarget({ districtId: dist.id, fileId: file.id })}
+                                  className="min-w-0 flex-1 cursor-pointer group/layer"
+                                  title="Haz clic para abrir el panel y gestionar las secciones de esta capa KML"
+                                >
+                                  <p className="font-semibold text-[11px] truncate group-hover/layer:text-blue-300 transition">
+                                    {file.name}
+                                  </p>
                                   <div className="flex items-center space-x-1.5 mt-0.5">
                                     <span className="text-[9px] font-mono font-bold bg-slate-800 text-blue-300 px-1.5 py-0.2 rounded border border-slate-700/50">
                                       {file.brigade || 'General'}
                                     </span>
                                     <span className="text-[9px] text-slate-500">
-                                      {file.kmlDoc?.features?.length || 0} elem.
+                                      {file.kmlDoc?.features?.length || 0} secc.
                                     </span>
                                   </div>
                                 </div>
                               </div>
 
-                              <button
-                                onClick={() => deleteKmlFile(dist.id, file.id)}
-                                className="p-1 text-slate-500 hover:text-rose-400 rounded transition cursor-pointer"
-                                title="Eliminar este archivo KML"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                              <div className="flex items-center space-x-1 flex-shrink-0">
+                                <button
+                                  onClick={() => setEditingLayerTarget({ districtId: dist.id, fileId: file.id })}
+                                  className="px-2 py-1 bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/30 rounded-lg text-[10px] font-bold transition flex items-center space-x-1 cursor-pointer select-none"
+                                  title="Abrir capa KML: Añadir o eliminar secciones"
+                                >
+                                  <Settings2 className="w-3 h-3" />
+                                  <span>Secciones</span>
+                                </button>
+
+                                <button
+                                  onClick={() => deleteKmlFile(dist.id, file.id)}
+                                  className="p-1 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-rose-950/30 transition cursor-pointer"
+                                  title="Eliminar este archivo KML completo"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             </div>
                           ))
                         )}
@@ -2510,6 +2713,25 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* MODAL: Layer Section Management (Add / Delete Sections directly from Admin Panel) */}
+      {editingLayerTarget && activeEditingDistrict && activeEditingFile && (
+        <LayerSectionModal
+          isOpen={true}
+          onClose={() => setEditingLayerTarget(null)}
+          district={activeEditingDistrict}
+          file={activeEditingFile}
+          allDistricts={districts}
+          featureBank={featureBank}
+          onUpdateFile={handleUpdateFileInDistrict}
+          onMoveFeatureToFile={handleMoveFeatureBetweenFiles}
+          onFocusFeatureOnMap={(feat) => {
+            setSelectedFeature(feat);
+            setFitBoundsTrigger(prev => prev + 1);
+          }}
+          getSeccionValue={getSeccionValue}
+        />
       )}
     </div>
   );
