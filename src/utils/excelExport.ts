@@ -1,69 +1,104 @@
 import * as XLSX from 'xlsx';
 
+export interface CoordinatorSectionPair {
+  coordinator: string;
+  section: string;
+}
+
 export interface BrigadeExportData {
-  brigade1Sections: string[];
-  brigade2Sections: string[];
+  brigade1Sections?: string[];
+  brigade2Sections?: string[];
   districtName?: string;
   additionalBrigades?: { name: string; sections: string[] }[];
+  coordinatorPairs?: CoordinatorSectionPair[];
+  coordinatorGroups?: { name: string; sections: string[] }[];
 }
 
 /**
  * Genera y descarga un archivo de Excel (.xlsx) con:
- * - Columna 1: BRIGADA 1 y sus secciones electorales
- * - Columna 2: BRIGADA 2 y sus secciones electorales
- * - Fila resumen de totales al final
+ * - Hoja 1: Tabla idéntica a la imagen del usuario: Columna 1 "COORDINADOR", Columna 2 "SECCION".
+ * - Hoja 2: Columnas organizadas por Coordinador / Brigada con sus secciones.
  */
 export function exportBrigadesToExcel(
   data: BrigadeExportData, 
-  filename = 'Brigadas_1_y_2_Secciones.xlsx'
+  filename = 'Coordinadores_y_Secciones_Distrito_11.xlsx'
 ) {
   const sortNumeric = (arr: string[]) => 
     [...arr].sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0));
 
-  const b1 = sortNumeric(data.brigade1Sections);
-  const b2 = sortNumeric(data.brigade2Sections);
+  const wb = XLSX.utils.book_new();
 
-  // Column headers: Exactamente Columna 1 = BRIGADA 1, Columna 2 = BRIGADA 2
-  const headers: string[] = ['BRIGADA 1', 'BRIGADA 2'];
-  const columnsData: (string | number)[][] = [b1, b2];
+  // 1. Determinar si disponemos de grupos de coordinadores
+  const coordGroups = data.coordinatorGroups || [];
+  
+  // Si no se pasaron coordinatorGroups explícitos pero sí brigade1 / brigade2 / additionalBrigades
+  const allGroups: { name: string; sections: string[] }[] = [];
+  if (coordGroups.length > 0) {
+    allGroups.push(...coordGroups);
+  } else {
+    if (data.brigade1Sections && data.brigade1Sections.length > 0) {
+      allGroups.push({ name: 'BRIGADA 1', sections: sortNumeric(data.brigade1Sections) });
+    }
+    if (data.brigade2Sections && data.brigade2Sections.length > 0) {
+      allGroups.push({ name: 'BRIGADA 2', sections: sortNumeric(data.brigade2Sections) });
+    }
+    if (data.additionalBrigades) {
+      data.additionalBrigades.forEach(b => {
+        allGroups.push({ name: b.name.toUpperCase(), sections: sortNumeric(b.sections) });
+      });
+    }
+  }
 
-  if (data.additionalBrigades && data.additionalBrigades.length > 0) {
-    data.additionalBrigades.forEach(b => {
-      headers.push(b.name.toUpperCase());
-      columnsData.push(sortNumeric(b.sections));
+  // --- HOJA 1: FORMATO TABLA (COORDINADOR | SECCION) tal cual la imagen del usuario ---
+  const tableRows: (string | number)[][] = [['COORDINADOR', 'SECCION']];
+  
+  if (data.coordinatorPairs && data.coordinatorPairs.length > 0) {
+    data.coordinatorPairs.forEach(pair => {
+      const num = Number(pair.section);
+      tableRows.push([pair.coordinator, !isNaN(num) ? num : pair.section]);
+    });
+  } else {
+    allGroups.forEach(g => {
+      g.sections.forEach(sec => {
+        const num = Number(sec);
+        tableRows.push([g.name, !isNaN(num) ? num : sec]);
+      });
     });
   }
 
-  const maxRows = Math.max(...columnsData.map(col => col.length), 0);
+  const wsTable = XLSX.utils.aoa_to_sheet(tableRows);
+  wsTable['!cols'] = [{ wch: 22 }, { wch: 18 }];
+  XLSX.utils.book_append_sheet(wb, wsTable, 'Coordinador y Sección');
 
-  const rows: (string | number)[][] = [headers];
+  // --- HOJA 2: FORMATO POR COLUMNAS (Una columna por Coordinador / Brigada) ---
+  if (allGroups.length > 0) {
+    const headers = allGroups.map(g => g.name.toUpperCase());
+    const columnsData = allGroups.map(g => g.sections);
+    const maxRows = Math.max(...columnsData.map(col => col.length), 0);
 
-  for (let r = 0; r < maxRows; r++) {
-    const row: (string | number)[] = [];
-    for (let c = 0; c < columnsData.length; c++) {
-      const val = columnsData[c][r];
-      if (val !== undefined && val !== null && val !== '') {
-        const num = Number(val);
-        row.push(!isNaN(num) && String(num) === String(val) ? num : val);
-      } else {
-        row.push('');
+    const matrixRows: (string | number)[][] = [headers];
+
+    for (let r = 0; r < maxRows; r++) {
+      const row: (string | number)[] = [];
+      for (let c = 0; c < columnsData.length; c++) {
+        const val = columnsData[c][r];
+        if (val !== undefined && val !== null && val !== '') {
+          const num = Number(val);
+          row.push(!isNaN(num) && String(num) === String(val) ? num : val);
+        } else {
+          row.push('');
+        }
       }
+      matrixRows.push(row);
     }
-    rows.push(row);
+
+    const totalsRow: string[] = columnsData.map(col => `Total: ${col.length} secciones`);
+    matrixRows.push(totalsRow);
+
+    const wsColumns = XLSX.utils.aoa_to_sheet(matrixRows);
+    wsColumns['!cols'] = headers.map(() => ({ wch: 20 }));
+    XLSX.utils.book_append_sheet(wb, wsColumns, 'Columnas por Brigada');
   }
-
-  // Fila resumen con el total de secciones por brigada
-  const totalsRow: string[] = columnsData.map(col => `Total: ${col.length} secciones`);
-  rows.push(totalsRow);
-
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-
-  // Configurar anchos de columna amplios para visualización clara en Excel
-  ws['!cols'] = headers.map(() => ({ wch: 24 }));
-
-  const wb = XLSX.utils.book_new();
-  const sheetName = (data.districtName || 'Distrito 11').substring(0, 31);
-  XLSX.utils.book_append_sheet(wb, ws, sheetName);
 
   if (typeof window !== 'undefined') {
     try {
@@ -84,7 +119,6 @@ export function exportBrigadesToExcel(
       return true;
     }
   } else {
-    // Node environment export
     XLSX.writeFile(wb, filename);
     return true;
   }

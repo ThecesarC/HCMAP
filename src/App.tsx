@@ -45,17 +45,18 @@ import {
   Save,
   FileSpreadsheet,
   Download,
-  Settings2
+  Settings2,
+  RefreshCw
 } from 'lucide-react';
 import { parseKml, serializeKml } from './utils/kmlParser';
+import { generateCompositeKml, downloadKmlFile } from './utils/kmlExport';
 import { KmlDocument, KmlFeature, District, DistrictKmlFile, DistrictFeature } from './types';
 import { SAMPLES } from './data/samples';
 import { getKmlFromFirestore, saveKmlToFirestore } from './lib/firebase';
 import { exportBrigadesToExcel } from './utils/excelExport';
 import { LayerSectionModal } from './components/LayerSectionModal';
 import currentKmlText from './data/current.kml?raw';
-import brigada1KmlText from './data/brigada1.kml?raw';
-import brigada2KmlText from './data/brigada2.kml?raw';
+import districtsSeedData from './data/districts.json';
 
 // Redefine Leaflet Default Icon behaviors to prevent path resolution bugs in dev servers
 // SafePolygon component to prevent react-leaflet Tooltip DOM removeChild unmount errors
@@ -275,18 +276,17 @@ function MapController({
 }
 
 const ALLOWED_SECCIONES = [
-  // Distrito 11 (64 secciones de Morelia distribuidas en 2 brigadas)
-  "968", "969", "970", "971", "974", "975", "976", "977", "978", "979",
-  "980", "981", "982", "983", "984", "985", "987", "988", "989", "990",
-  "991", "992", "993", "994", "995", "1024", "1025", "1026", "1027", "1028",
-  "1029", "1030", "1031", "1032", "1033", "1034", "1036", "1037", "1038", "1039",
-  "1040", "1042", "1070", "1071", "1072", "1081", "1082", "1084", "1085", "1086",
-  "1087", "1094", "1095", "1096", "1098", "1099", "1100", "1101", "1104", "1105",
-  "1106", "1108", "1109", "1206",
-  // Secciones históricas adicionales
-  "2729", "2802", "2804", "2805", "1145", "1148", "1149", "1151", "1152", "1153",
-  "1161", "2809", "2810", "2811", "2814", "2815", "2776", "1008", "1052", "1060",
-  "1061", "1141", "1142", "1047", "1022", "1211", "1019", "1210", "2721", "2748"
+  // 30 secciones oficiales de Distrito 11 asignadas a los 10 Coordinadores
+  "1025", "2692", "2703", // DAVID
+  "1040", "1100", "1101", // MIGUEL ANGEL
+  "1038", "1036", "1037", // ELEAZAR
+  "1044", "1045", "1046", // ROSA ELIA
+  "975", "976", "984",    // LEONARDO
+  "993", "1024", "1026",  // CANDY
+  "1088", "1089", "1099", // MAULEON
+  "1104", "1105", "1106", // ROBERTO
+  "1108", "1109", "2793", // EVELIA
+  "2788", "2789", "2791"  // ALFREDO
 ];
 
 // Normalize values to remove decimals or spaces (e.g., "2729.0" -> "2729")
@@ -411,40 +411,117 @@ const carriesArea = (feature: KmlFeature): boolean => {
   return false;
 };
 
-// Palette of distinct colors for Brigadas (Brigada 1: Rojo, Brigada 2: Azul)
+// Palette of distinct colors for Brigadas and Coordinators matching user specifications
+export interface CoordinatorConfig {
+  name: string;
+  color: string;
+  border: string;
+  sections: string[];
+}
+
+export const COORDINADORES_LIST: CoordinatorConfig[] = [
+  { name: 'DAVID', color: '#808080', border: '#4b5563', sections: ['1025', '2692', '2703'] },
+  { name: 'MIGUEL ANGEL', color: '#00a8e8', border: '#0284c7', sections: ['1040', '1100', '1101'] },
+  { name: 'ELEAZAR', color: '#1e1b78', border: '#172554', sections: ['1038', '1036', '1037'] },
+  { name: 'ROSA ELIA', color: '#f97316', border: '#ea580c', sections: ['1044', '1045', '1046'] },
+  { name: 'LEONARDO', color: '#16a34a', border: '#15803d', sections: ['975', '976', '984'] },
+  { name: 'CANDY', color: '#06b6d4', border: '#0e7490', sections: ['993', '1024', '1026'] },
+  { name: 'MAULEON', color: '#ef4444', border: '#dc2626', sections: ['1088', '1089', '1099'] },
+  { name: 'ROBERTO', color: '#eab308', border: '#ca8a04', sections: ['1104', '1105', '1106'] },
+  { name: 'EVELIA', color: '#ec4899', border: '#be185d', sections: ['1108', '1109', '2793'] },
+  { name: 'ALFREDO', color: '#85754d', border: '#574c35', sections: ['2788', '2789', '2791'] }
+];
+
+export const SECTION_TO_COORDINATOR: Record<string, CoordinatorConfig> = {};
+COORDINADORES_LIST.forEach(c => {
+  c.sections.forEach(s => {
+    SECTION_TO_COORDINATOR[s] = c;
+  });
+});
+
 const PALETTE_BRIGADAS = [
-  { fill: '#dc2626', border: '#991b1b', defaultName: 'Brigada 1' }, // Rojo / Red
-  { fill: '#2563eb', border: '#1d4ed8', defaultName: 'Brigada 2' }, // Azul / Blue
-  { fill: '#16a34a', border: '#15803d', defaultName: 'Brigada 3' }, // Verde / Green
-  { fill: '#8b4513', border: '#5c2e0b', defaultName: 'Brigada 4' }, // Marrón / Brown
-  { fill: '#9333ea', border: '#6b21a8', defaultName: 'Brigada 5' }, // Púrpura / Purple
-  { fill: '#0284c7', border: '#0369a1', defaultName: 'Brigada 6' }, // Sky
-  { fill: '#ea580c', border: '#c2410c', defaultName: 'Brigada 7' }, // Naranja
-  { fill: '#db2777', border: '#be185d', defaultName: 'Brigada 8' }, // Rosa
-  { fill: '#0d9488', border: '#0f766e', defaultName: 'Brigada 9' }, // Teal
-  { fill: '#7c3aed', border: '#6d28d9', defaultName: 'Brigada 10' }  // Violeta
+  { fill: '#808080', border: '#4b5563', defaultName: 'DAVID' },
+  { fill: '#00a8e8', border: '#0284c7', defaultName: 'MIGUEL ANGEL' },
+  { fill: '#1e1b78', border: '#172554', defaultName: 'ELEAZAR' },
+  { fill: '#f97316', border: '#ea580c', defaultName: 'ROSA ELIA' },
+  { fill: '#16a34a', border: '#15803d', defaultName: 'LEONARDO' },
+  { fill: '#06b6d4', border: '#0e7490', defaultName: 'CANDY' },
+  { fill: '#ef4444', border: '#dc2626', defaultName: 'MAULEON' },
+  { fill: '#eab308', border: '#ca8a04', defaultName: 'ROBERTO' },
+  { fill: '#ec4899', border: '#be185d', defaultName: 'EVELIA' },
+  { fill: '#85754d', border: '#574c35', defaultName: 'ALFREDO' }
 ];
 
-// Secciones electorales de Morelia agrupadas en 2 Brigadas balanceadas (32 secciones cada una) por proximidad métrica
-const SECCIONES_BRIGADA_1 = [
-  '968', '969', '970', '971', '974', '975', '976', '977', '978', '987', 
-  '988', '989', '990', '991', '992', '993', '994', '995', '1024', '1025', 
-  '1026', '1027', '1028', '1029', '1030', '1031', '1032', '1042', '1070', 
-  '1071', '1072', '1206'
+export const COORDINADORES_ORDER = [
+  'DAVID',
+  'MIGUEL ANGEL',
+  'ELEAZAR',
+  'ROSA ELIA',
+  'LEONARDO',
+  'CANDY',
+  'MAULEON',
+  'ROBERTO',
+  'EVELIA',
+  'ALFREDO'
 ];
 
-const SECCIONES_BRIGADA_2 = [
-  '979', '980', '981', '982', '983', '984', '985', '1033', '1034', '1036', 
-  '1037', '1038', '1039', '1040', '1081', '1082', '1084', '1085', '1086', 
-  '1087', '1094', '1095', '1096', '1098', '1099', '1100', '1101', '1104', 
-  '1105', '1106', '1108', '1109'
-];
+export const STORAGE_KEY_DISTRICTS = 'districts_data_v6';
+
+export const purgeLegacyDistrictCache = () => {
+  ['districts_data_v1', 'districts_data_v2', 'districts_data_v3', 'districts_data_v4', 'districts_data_v5'].forEach(k => {
+    try { localStorage.removeItem(k); } catch (e) {}
+  });
+};
+
+export const sortDistrictKmlFiles = (files: any[]): any[] => {
+  if (!Array.isArray(files)) return [];
+  return [...files].sort((a, b) => {
+    const rawA = (a.brigade || a.name || '').replace(/\.kml$/i, '').trim().toUpperCase();
+    const rawB = (b.brigade || b.name || '').replace(/\.kml$/i, '').trim().toUpperCase();
+    let idxA = COORDINADORES_ORDER.indexOf(rawA);
+    let idxB = COORDINADORES_ORDER.indexOf(rawB);
+    if (idxA === -1) idxA = COORDINADORES_ORDER.findIndex(c => rawA.includes(c));
+    if (idxB === -1) idxB = COORDINADORES_ORDER.findIndex(c => rawB.includes(c));
+    if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+    if (idxA !== -1) return -1;
+    if (idxB !== -1) return 1;
+    return rawA.localeCompare(rawB);
+  });
+};
 
 function getFeatureBrigadeInfo(feature: any): { key: string; name: string; color: string; border: string } {
-  // 1. Check explicitly assigned brigadeName from file upload / district management (e.g. 'Brigada 1', 'Brigada 2')
   const brigadeNameStr = (feature.brigadeName || '').trim();
+  const upperB = brigadeNameStr.toUpperCase();
+  const secVal = getSeccionValue(feature);
+
+  // 1. Direct coordinator matching by name, property, or filename
+  for (const coord of COORDINADORES_LIST) {
+    if (upperB === coord.name || 
+        upperB.includes(coord.name) || 
+        (feature.properties && feature.properties['COORDINADOR'] && String(feature.properties['COORDINADOR']).toUpperCase() === coord.name) ||
+        (feature.fileName && feature.fileName.toUpperCase().includes(coord.name))) {
+      return {
+        key: `coord-${coord.name.toLowerCase().replace(/\s+/g, '-')}`,
+        name: coord.name,
+        color: coord.color,
+        border: coord.border
+      };
+    }
+  }
+
+  // 2. Check if section belongs to one of the 10 coordinators
+  if (secVal && SECTION_TO_COORDINATOR[secVal]) {
+    const coord = SECTION_TO_COORDINATOR[secVal];
+    return {
+      key: `coord-${coord.name.toLowerCase().replace(/\s+/g, '-')}`,
+      name: coord.name,
+      color: coord.color,
+      border: coord.border
+    };
+  }
+
+  // 3. Fallback for generic brigade names
   const lowerB = brigadeNameStr.toLowerCase();
-  
   const isGeneric = !brigadeNameStr || 
                     lowerB === 'general' || 
                     lowerB === 'general (b1-b4)' || 
@@ -466,48 +543,26 @@ function getFeatureBrigadeInfo(feature: any): { key: string; name: string; color
     }
   }
 
-  // 2. Check properties / text in name / description for explicit BRIGADA tags (e.g., BRIGADA 1, B1, BRIGADA_2)
-  const fullSearchText = `${feature.name || ''} ${feature.description || ''} ${JSON.stringify(feature.properties || {})}`.toUpperCase();
-  const bMatch = fullSearchText.match(/BRIGADA\s*(\d+)/i) || fullSearchText.match(/\bB(\d+)\b/i) || fullSearchText.match(/BRIGADA_(\d+)/i);
-  if (bMatch) {
-    const num = parseInt(bMatch[1], 10);
-    const idx = (num - 1) % PALETTE_BRIGADAS.length;
-    const palette = PALETTE_BRIGADAS[Math.max(0, idx)];
-    return { key: `brigada-${num}`, name: `Brigada ${num}`, color: palette.fill, border: palette.border };
-  }
-
-  // 3. Check if file name itself specifies a Brigade (e.g., "Brigada_2.kml", "B2.kml")
-  if (feature.fileName) {
-    const fnMatch = feature.fileName.match(/BRIGADA\s*(\d+)/i) || feature.fileName.match(/\bB(\d+)\b/i) || feature.fileName.match(/BRIGADA_(\d+)/i);
-    if (fnMatch) {
-      const num = parseInt(fnMatch[1], 10);
-      const idx = (num - 1) % PALETTE_BRIGADAS.length;
-      const palette = PALETTE_BRIGADAS[Math.max(0, idx)];
-      return { key: `brigada-${num}`, name: `Brigada ${num}`, color: palette.fill, border: palette.border };
-    }
-  }
-
-  // 4. Default section mappings for Morelia (32 secciones en Brigada 1 Rojo, 32 secciones en Brigada 2 Azul)
-  const secVal = getSeccionValue(feature);
-  if (secVal) {
-    if (SECCIONES_BRIGADA_1.includes(secVal)) {
-      return { key: 'brigada-1', name: 'Brigada 1', color: PALETTE_BRIGADAS[0].fill, border: PALETTE_BRIGADAS[0].border };
-    }
-    if (SECCIONES_BRIGADA_2.includes(secVal)) {
-      return { key: 'brigada-2', name: 'Brigada 2', color: PALETTE_BRIGADAS[1].fill, border: PALETTE_BRIGADAS[1].border };
-    }
-    // Mapeo retrocompatible para secciones de muestra adicionales
-    if (['1145', '1148', '1149', '1151', '1152', '1153', '1161', '2810', '2811', '2814', '2815', '2776', '1047'].includes(secVal)) {
-      return { key: 'brigada-1', name: 'Brigada 1', color: PALETTE_BRIGADAS[0].fill, border: PALETTE_BRIGADAS[0].border };
-    }
-    if (['2802', '2804', '2805', '1008'].includes(secVal)) {
-      return { key: 'brigada-2', name: 'Brigada 2', color: PALETTE_BRIGADAS[1].fill, border: PALETTE_BRIGADAS[1].border };
-    }
-  }
-
-  // Fallback: Default cleanly to Brigada 1
-  return { key: 'brigada-1', name: 'Brigada 1', color: PALETTE_BRIGADAS[0].fill, border: PALETTE_BRIGADAS[0].border };
+  // Fallback to first coordinator (DAVID)
+  return { key: 'coord-david', name: 'DAVID', color: '#808080', border: '#4b5563' };
 }
+
+const getInitialDefaultDistricts = (): District[] => {
+  const seedDists: any[] = (districtsSeedData as any).districts || districtsSeedData || [];
+  return seedDists.map((d: any) => ({
+    ...d,
+    kmlFiles: sortDistrictKmlFiles((d.kmlFiles || []).map((f: any) => {
+      if (f.kmlText && !f.kmlDoc) {
+        try {
+          return { ...f, kmlDoc: parseKml(f.kmlText) };
+        } catch (e) {
+          return f;
+        }
+      }
+      return f;
+    }))
+  }));
+};
 
 export default function App() {
   const [kmlDoc, setKmlDoc] = useState<KmlDocument | null>(null);
@@ -519,42 +574,40 @@ export default function App() {
 
   // Districts & Brigades State Management
   const [districts, setDistricts] = useState<District[]>(() => {
-    const saved = localStorage.getItem('districts_data_v3');
+    purgeLegacyDistrictCache();
+    const saved = localStorage.getItem(STORAGE_KEY_DISTRICTS);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const filtered = parsed
-            .filter((d: any) => d.id !== 'distrito-8' && !d.name.includes('Distrito 8'))
-            .map((d: any) => ({
-              ...d,
-              kmlFiles: (d.kmlFiles || []).map((f: any) => {
-                if (f.kmlText && !f.kmlDoc) {
-                  try {
-                    return { ...f, kmlDoc: parseKml(f.kmlText) };
-                  } catch (e) {
-                    return f;
+          // If cached data has obsolete 2-brigade distribution, ignore it so new 10 coordinator distribution takes effect
+          const hasOldBrigades = parsed.some((d: any) => 
+            (d.kmlFiles || []).some((f: any) => f.name && (f.name.includes('BRIGADA 1') || f.name.includes('BRIGADA 2')))
+          );
+          if (!hasOldBrigades) {
+            const filtered = parsed
+              .filter((d: any) => d.id !== 'distrito-8' && !d.name.includes('Distrito 8'))
+              .map((d: any) => ({
+                ...d,
+                kmlFiles: sortDistrictKmlFiles((d.kmlFiles || []).map((f: any) => {
+                  if (f.kmlText && !f.kmlDoc) {
+                    try {
+                      return { ...f, kmlDoc: parseKml(f.kmlText) };
+                    } catch (e) {
+                      return f;
+                    }
                   }
-                }
-                return f;
-              })
-            }));
-          if (filtered.length > 0) return filtered;
+                  return f;
+                }))
+              }));
+            if (filtered.length > 0) return filtered;
+          }
         }
       } catch (e) {
-        console.warn("Could not parse saved districts_data_v3:", e);
+        console.warn("Could not parse saved districts_data_v6:", e);
       }
     }
-    return [
-      {
-        id: 'distrito-11',
-        name: 'Distrito 11',
-        description: 'Polígonos y secciones de Morelia distribuidos en 2 Brigadas por proximidad métrica',
-        enabled: true,
-        color: '#dc2626', // Rojo
-        kmlFiles: []
-      }
-    ];
+    return getInitialDefaultDistricts();
   });
 
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
@@ -625,7 +678,7 @@ export default function App() {
   useEffect(() => {
     if (districts && districts.length > 0) {
       try {
-        localStorage.setItem('districts_data_v3', JSON.stringify(districts));
+        localStorage.setItem(STORAGE_KEY_DISTRICTS, JSON.stringify(districts));
       } catch (e) {
         console.warn("Error saving districts to localStorage:", e);
       }
@@ -751,7 +804,7 @@ export default function App() {
       // 3. Load from localStorage fallback
       let localDistrictsData: District[] | null = null;
       let localUpdatedAt = 0;
-      const savedLocal = localStorage.getItem('districts_data_v3');
+      const savedLocal = localStorage.getItem(STORAGE_KEY_DISTRICTS);
       if (savedLocal) {
         try {
           const parsed = JSON.parse(savedLocal);
@@ -769,7 +822,7 @@ export default function App() {
           .filter((d: any) => d.id !== 'distrito-8' && d.name !== 'Distrito 8')
           .map((d: any) => ({
             ...d,
-            kmlFiles: (d.kmlFiles || []).map((f: any) => {
+            kmlFiles: sortDistrictKmlFiles((d.kmlFiles || []).map((f: any) => {
               if (f.kmlText) {
                 try {
                   const parsed = parseKml(f.kmlText);
@@ -780,18 +833,16 @@ export default function App() {
                 }
               }
               return f;
-            }).filter((f: any) => f && f.kmlDoc && Array.isArray(f.kmlDoc.features))
+            }).filter((f: any) => f && f.kmlDoc && Array.isArray(f.kmlDoc.features)))
           }));
       };
 
-      // Helper to detect unedited default seed template
+      // Helper to detect unedited default seed template or obsolete 2-brigade distribution
       const isDefaultTemplate = (dList: any[] | null | undefined): boolean => {
         if (!dList || dList.length === 0) return true;
         if (dList.length === 1 && (dList[0].id === 'distrito-11' || dList[0].name === 'Distrito 11')) {
           const files = dList[0].kmlFiles || [];
-          if (files.length === 2 && 
-              files.some((f: any) => f.name && f.name.includes('BRIGADA 1 DT11')) && 
-              files.some((f: any) => f.name && f.name.includes('BRIGADA 2 DT11'))) {
+          if (files.some((f: any) => f.name && (f.name.includes('BRIGADA 1') || f.name.includes('BRIGADA 2')))) {
             return true;
           }
         }
@@ -872,45 +923,8 @@ export default function App() {
         }
       } else {
         // Fresh start with no saved data anywhere: initialize default canonical files
-        console.log("Inicializando con archivos KML canónicos de muestra por defecto...");
-        const canonicalD11Files: DistrictKmlFile[] = [];
-        try {
-          if (brigada1KmlText) {
-            canonicalD11Files.push({
-              id: 'd11-brigada1-kml',
-              name: 'BRIGADA 1 DT11.kml',
-              brigade: 'Brigada 1',
-              enabled: true,
-              kmlText: brigada1KmlText,
-              kmlDoc: parseKml(brigada1KmlText),
-              uploadedAt: new Date().toLocaleDateString('es-MX')
-            });
-          }
-          if (brigada2KmlText) {
-            canonicalD11Files.push({
-              id: 'd11-brigada2-kml',
-              name: 'BRIGADA 2 DT11.kml',
-              brigade: 'Brigada 2',
-              enabled: true,
-              kmlText: brigada2KmlText,
-              kmlDoc: parseKml(brigada2KmlText),
-              uploadedAt: new Date().toLocaleDateString('es-MX')
-            });
-          }
-        } catch (e) {
-          console.error("Error parsing default Brigada KMLs:", e);
-        }
-
-        finalDistricts = [
-          {
-            id: 'distrito-11',
-            name: 'Distrito 11',
-            description: 'Polígonos y secciones de Morelia distribuidos en 2 Brigadas por proximidad métrica',
-            enabled: true,
-            color: '#dc2626',
-            kmlFiles: canonicalD11Files
-          }
-        ];
+        console.log("Inicializando con los 10 Coordinadores canónicos de Distrito 11 por defecto...");
+        finalDistricts = getInitialDefaultDistricts();
       }
 
       setDistricts(finalDistricts);
@@ -924,7 +938,7 @@ export default function App() {
             return rest;
           })
         }));
-        localStorage.setItem('districts_data_v3', JSON.stringify(clean));
+        localStorage.setItem(STORAGE_KEY_DISTRICTS, JSON.stringify(clean));
         if (sources.length > 0 && sources[0].updatedAt) {
           localStorage.setItem('districts_updated_at', sources[0].updatedAt.toString());
         }
@@ -966,7 +980,7 @@ export default function App() {
 
       // 0. Always save to LocalStorage immediately so local session is never lost
       try {
-        localStorage.setItem('districts_data_v3', JSON.stringify(cleanDistricts));
+        localStorage.setItem(STORAGE_KEY_DISTRICTS, JSON.stringify(cleanDistricts));
         localStorage.setItem('districts_updated_at', now.toString());
         localStorage.setItem('app_has_custom_config', 'true');
         if (mainKmlText) {
@@ -1149,7 +1163,7 @@ export default function App() {
 
     // Update LocalStorage immediately
     try {
-      localStorage.setItem('districts_data_v3', JSON.stringify(clean));
+      localStorage.setItem(STORAGE_KEY_DISTRICTS, JSON.stringify(clean));
       localStorage.setItem('districts_updated_at', now.toString());
       localStorage.setItem('app_has_custom_config', 'true');
     } catch (e) {
@@ -1203,8 +1217,6 @@ export default function App() {
       } catch (e) {}
     };
 
-    seedFromRaw(brigada1KmlText);
-    seedFromRaw(brigada2KmlText);
     seedFromRaw(currentKmlText);
 
     districts.forEach(d => {
@@ -1246,7 +1258,7 @@ export default function App() {
     }));
 
     try {
-      localStorage.setItem('districts_data_v3', JSON.stringify(cleanDistricts));
+      localStorage.setItem(STORAGE_KEY_DISTRICTS, JSON.stringify(cleanDistricts));
       localStorage.setItem('districts_updated_at', now.toString());
       localStorage.setItem('app_has_custom_config', 'true');
     } catch (e) {}
@@ -1335,7 +1347,7 @@ export default function App() {
     }));
 
     try {
-      localStorage.setItem('districts_data_v3', JSON.stringify(cleanDistricts));
+      localStorage.setItem(STORAGE_KEY_DISTRICTS, JSON.stringify(cleanDistricts));
       localStorage.setItem('districts_updated_at', now.toString());
       localStorage.setItem('app_has_custom_config', 'true');
     } catch (e) {}
@@ -1428,7 +1440,7 @@ export default function App() {
 
       // Immediately save to LocalStorage with timestamp
       try {
-        localStorage.setItem('districts_data_v3', JSON.stringify(cleanDistricts));
+        localStorage.setItem(STORAGE_KEY_DISTRICTS, JSON.stringify(cleanDistricts));
         localStorage.setItem('districts_updated_at', now.toString());
         localStorage.setItem('app_has_custom_config', 'true');
         if (combinedText) {
@@ -1546,12 +1558,11 @@ export default function App() {
     activeFeatures.forEach(f => {
       if (!f) return;
       const bInfo = getFeatureBrigadeInfo(f);
-      const style = getFeatureStyle(f);
       
       if (!groups[bInfo.key]) {
         groups[bInfo.key] = {
           key: bInfo.key,
-          color: style.fillColor || bInfo.color,
+          color: bInfo.color,
           friendlyName: bInfo.name,
           features: []
         };
@@ -1559,15 +1570,22 @@ export default function App() {
       groups[bInfo.key].features.push(f);
     });
 
-    const getBrigadeNumber = (name: string): number => {
-      const match = name.match(/\d+/);
-      return match ? parseInt(match[0], 10) : 999;
-    };
-    
-    // Sort so Brigada 1, Brigada 2, Brigada 3, Brigada 4, Brigada 5 appear in natural sequence
+    // Sort groups in the exact coordinator order (DAVID, MIGUEL ANGEL, ELEAZAR, ROSA ELIA, LEONARDO, CANDY, MAULEON, ROBERTO, EVELIA, ALFREDO)
+    const coordOrder = COORDINADORES_ORDER;
     const sortedGroups = Object.values(groups).sort((a, b) => {
-      const numA = getBrigadeNumber(a.friendlyName);
-      const numB = getBrigadeNumber(b.friendlyName);
+      const nameA = a.friendlyName.toUpperCase();
+      const nameB = b.friendlyName.toUpperCase();
+      let idxA = coordOrder.indexOf(nameA);
+      let idxB = coordOrder.indexOf(nameB);
+      if (idxA === -1) idxA = coordOrder.findIndex(c => nameA.includes(c));
+      if (idxB === -1) idxB = coordOrder.findIndex(c => nameB.includes(c));
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      const matchA = nameA.match(/\d+/);
+      const matchB = nameB.match(/\d+/);
+      const numA = matchA ? parseInt(matchA[0], 10) : 999;
+      const numB = matchB ? parseInt(matchB[0], 10) : 999;
       if (numA !== numB) return numA - numB;
       return a.friendlyName.localeCompare(b.friendlyName);
     });
@@ -1704,13 +1722,13 @@ export default function App() {
   // State for download notification toast
   const [excelNotice, setExcelNotice] = useState<string | null>(null);
 
-  // Helper to extract clean sorted sections for any brigade from loaded map data or canonical list
-  const getBrigadeSections = (targetBrigadeNum: number): string[] => {
-    // 1. Check in dynamically active colorGroups from current map features
+  // Helper to extract clean sorted sections for any coordinator or brigade from loaded map data or canonical list
+  const getBrigadeSections = (targetCoordinatorOrBrigade: string | number): string[] => {
+    const searchStr = String(targetCoordinatorOrBrigade).toLowerCase();
     const group = colorGroups.find(g => {
       const fn = g.friendlyName.toLowerCase();
       const key = g.key.toLowerCase();
-      return fn.includes(`brigada ${targetBrigadeNum}`) || key.includes(`brigada-${targetBrigadeNum}`);
+      return fn.includes(searchStr) || key.includes(searchStr);
     });
 
     const secSet = new Set<string>();
@@ -1725,47 +1743,43 @@ export default function App() {
       return Array.from(secSet).sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0));
     }
 
-    // 2. Canonical 32 sections per brigade fallback
-    return targetBrigadeNum === 1
-      ? [...SECCIONES_BRIGADA_1].sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0))
-      : [...SECCIONES_BRIGADA_2].sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0));
+    const coord = COORDINADORES_LIST.find(c => c.name.toLowerCase() === searchStr);
+    if (coord) {
+      return [...coord.sections].sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0));
+    }
+
+    return [];
   };
 
-  // Handler to export and download the Excel file with Column 1 = Brigada 1 and Column 2 = Brigada 2
+  // Handler to export and download the Excel file with Coordinator tables and columns
   const handleDownloadExcel = () => {
     try {
-      const b1 = getBrigadeSections(1);
-      const b2 = getBrigadeSections(2);
+      const coordinatorPairs: { coordinator: string; section: string }[] = [];
+      const coordinatorGroups: { name: string; sections: string[] }[] = [];
 
-      // Collect any additional brigades if the user uploaded extra layers
-      const additional = colorGroups
-        .filter(g => {
-          const fn = g.friendlyName.toLowerCase();
-          const key = g.key.toLowerCase();
-          return !fn.includes('brigada 1') && !key.includes('brigada-1') &&
-                 !fn.includes('brigada 2') && !key.includes('brigada-2');
-        })
-        .map(g => {
-          const sSet = new Set<string>();
-          g.features.forEach(f => {
-            const s = getSeccionValue(f);
-            if (s) sSet.add(s);
+      COORDINADORES_LIST.forEach(coord => {
+        const sectionsForCoord: string[] = [];
+        coord.sections.forEach(secNum => {
+          sectionsForCoord.push(secNum);
+          coordinatorPairs.push({
+            coordinator: coord.name,
+            section: secNum
           });
-          return {
-            name: g.friendlyName,
-            sections: Array.from(sSet).sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0))
-          };
-        })
-        .filter(g => g.sections.length > 0);
+        });
+
+        coordinatorGroups.push({
+          name: coord.name,
+          sections: sectionsForCoord
+        });
+      });
 
       exportBrigadesToExcel({
-        brigade1Sections: b1,
-        brigade2Sections: b2,
-        districtName: 'Distrito 11 - Morelia',
-        additionalBrigades: additional
-      }, 'Brigadas_1_y_2_Secciones.xlsx');
+        coordinatorPairs,
+        coordinatorGroups,
+        districtName: 'Distrito 11 - Morelia'
+      }, 'Coordinadores_y_Secciones_Distrito_11.xlsx');
 
-      setExcelNotice(`Descargado con éxito: Brigada 1 (${b1.length} secciones) y Brigada 2 (${b2.length} secciones)`);
+      setExcelNotice(`Descargado con éxito: 10 Coordinadores y 30 Secciones en Excel`);
       setTimeout(() => setExcelNotice(null), 4500);
     } catch (err) {
       console.error('Error al generar Excel:', err);
@@ -1773,10 +1787,109 @@ export default function App() {
     }
   };
 
+  // Check if current authenticated user has administrator privileges
+  const isAdmin = Boolean(
+    currentUser && [
+      'hugocesarlemuscortes@gmail.com',
+      'bunkerhrv@gmail.com'
+    ].includes(currentUser.email.trim().toLowerCase())
+  );
+
+  // State for KML download notification toast
+  const [kmlNotice, setKmlNotice] = useState<string | null>(null);
+
+  // Handler to export and download composite KML with ordered layers reflecting the live map
+  // SEGURIDAD: Solo el Administrador puede descargar el archivo KML
+  const handleDownloadCompositeKml = (targetDistrictId?: string) => {
+    if (!isAdmin) {
+      setErrorMsg('Acceso denegado: El archivo KML del mapa solo puede ser descargado por el Administrador.');
+      return;
+    }
+
+    try {
+      const isSingleDistrict = Boolean(targetDistrictId);
+      const targetDist = isSingleDistrict ? districts.find(d => d.id === targetDistrictId) : null;
+      
+      const docTitle = targetDist 
+        ? `Mapa Electoral - ${targetDist.name}`
+        : 'Mapa Electoral - Distritos y Brigadas';
+      
+      const filename = targetDist
+        ? `mapa_${targetDist.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}_completo.kml`
+        : `mapa_electoral_completo_${new Date().toISOString().slice(0, 10)}.kml`;
+
+      const kmlXml = generateCompositeKml(districts, {
+        title: docTitle,
+        description: `Exportación completa del mapa electoral de HCES.MAPS con capas y brigadas ordenadas, reflejando el estado actual de la edición.`,
+        districtId: targetDistrictId
+      });
+
+      const success = downloadKmlFile(kmlXml, filename);
+      if (success) {
+        const relevantDistricts = targetDist ? [targetDist] : districts;
+        const totalSections = relevantDistricts.reduce(
+          (acc, d) => acc + d.kmlFiles.reduce((fAcc, f) => fAcc + (f.kmlDoc?.features?.length || 0), 0),
+          0
+        );
+        const layersCount = relevantDistricts.reduce(
+          (acc, d) => acc + d.kmlFiles.length,
+          0
+        );
+        setKmlNotice(
+          `¡KML descargado con éxito! Se exportaron ${layersCount} capas y ${totalSections} secciones en un único archivo KML ordenado.`
+        );
+        setTimeout(() => setKmlNotice(null), 5000);
+      } else {
+        setErrorMsg('Error al iniciar la descarga del archivo KML.');
+      }
+    } catch (err: any) {
+      console.error('Error al generar KML compuesto:', err);
+      setErrorMsg('No se pudo generar el archivo KML compuesto.');
+    }
+  };
+
+  // Force-reset local & mobile storage directly to the official 10 coordinators and colors
+  const handleForceSyncOfficial = async () => {
+    purgeLegacyDistrictCache();
+    try {
+      localStorage.removeItem(STORAGE_KEY_DISTRICTS);
+      localStorage.removeItem('districts_updated_at');
+    } catch (e) {}
+
+    const defaultCanonical = getInitialDefaultDistricts();
+    setDistricts(defaultCanonical);
+    setSelectedColorGroup(null);
+
+    const now = Date.now();
+    const cleanDistricts = defaultCanonical.map(d => ({
+      ...d,
+      kmlFiles: (d.kmlFiles || []).map(f => {
+        const { kmlDoc, ...rest } = f;
+        return rest;
+      })
+    }));
+
+    try {
+      localStorage.setItem(STORAGE_KEY_DISTRICTS, JSON.stringify(cleanDistricts));
+      localStorage.setItem('districts_updated_at', now.toString());
+    } catch (e) {}
+
+    try {
+      await fetch('/api/districts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ districts: cleanDistricts, updatedAt: now })
+      });
+    } catch (e) {}
+
+    setExcelNotice('¡Caché móvil restablecida! Orden y colores oficiales actualizados.');
+    setTimeout(() => {
+      setExcelNotice(null);
+      setFitAllTrigger(prev => prev + 1);
+    }, 3000);
+  };
+
   const metrics = selectedFeature ? calculateFeatureMetrics(selectedFeature) : null;
-  const isAdmin = currentUser && [
-    'hugocesarlemuscortes@gmail.com'
-  ].includes(currentUser.email.trim().toLowerCase());
 
   return (
     <div className="h-screen w-screen flex flex-col bg-[#050505] text-[#e2e8f0] overflow-hidden font-sans">
@@ -1883,6 +1996,20 @@ export default function App() {
             <span className="sm:hidden">Excel</span>
           </button>
 
+          {/* Botón Descargar KML Completo para Admin */}
+          {isAdmin && (
+            <button
+              onClick={() => handleDownloadCompositeKml()}
+              id="download-kml-header-btn"
+              className="px-2.5 sm:px-3 py-1.5 rounded-xl font-bold text-xs flex items-center space-x-1.5 border border-blue-500/50 bg-blue-950/50 hover:bg-blue-600 text-blue-300 hover:text-white transition shadow-sm cursor-pointer select-none active:scale-[0.98]"
+              title="Descargar el mapa actual en formato KML con sus capas y brigadas ordenadas en un mismo archivo"
+            >
+              <Download className="w-3.5 h-3.5 text-blue-400 group-hover:text-white" />
+              <span className="hidden sm:inline">Descargar KML</span>
+              <span className="sm:hidden">KML</span>
+            </button>
+          )}
+
           {isAdmin && (
             <button
               onClick={saveKmlToServer}
@@ -1976,6 +2103,16 @@ export default function App() {
               </div>
 
               <div className="flex items-center space-x-1.5">
+                {isAdmin && (
+                  <button
+                    onClick={() => handleDownloadCompositeKml()}
+                    className="px-2 py-1 bg-blue-950/60 hover:bg-blue-900/80 text-blue-300 border border-blue-800/50 rounded-lg text-xs font-semibold transition flex items-center space-x-1 cursor-pointer"
+                    title="Descargar todo el mapa en formato KML con sus capas ordenadas (Solo Administrador)"
+                  >
+                    <Download className="w-3.5 h-3.5 text-blue-400" />
+                    <span className="text-[10px]">Exportar KML</span>
+                  </button>
+                )}
                 <button
                   onClick={() => setNewDistrictModalOpen(true)}
                   className="px-2.5 py-1 bg-purple-950/50 hover:bg-purple-900/70 text-purple-300 border border-purple-800/40 rounded-lg text-xs font-semibold transition flex items-center space-x-1 cursor-pointer"
@@ -2066,6 +2203,16 @@ export default function App() {
                             <FileSpreadsheet className="w-3 h-3 text-emerald-400" />
                             <span>Excel</span>
                           </button>
+                          {isAdmin && (
+                            <button
+                              onClick={() => handleDownloadCompositeKml(dist.id)}
+                              className="px-2 py-1 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 rounded-lg text-[10px] font-bold transition flex items-center space-x-1 cursor-pointer"
+                              title={`Descargar KML de ${dist.name} con sus capas ordenadas (Solo Administrador)`}
+                            >
+                              <Download className="w-3 h-3 text-blue-400" />
+                              <span>KML</span>
+                            </button>
+                          )}
                           <button
                             onClick={() => {
                               setTargetDistrictId(dist.id);
@@ -2178,6 +2325,17 @@ export default function App() {
 
             {/* Sidebar Save Changes Action Block */}
             <div className="p-3 border-t border-[#1e293b] bg-slate-900/90 space-y-2">
+              {isAdmin && (
+                <button
+                  onClick={() => handleDownloadCompositeKml()}
+                  className="w-full py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center space-x-2 border border-blue-500/40 bg-blue-950/40 hover:bg-blue-600 text-blue-200 hover:text-white transition shadow cursor-pointer select-none active:scale-[0.98]"
+                  title="Descarga el mapa actual con todas las brigadas y capas ordenadas en un único archivo KML para Google Earth / QGIS (Solo Administrador)"
+                >
+                  <Download className="w-3.5 h-3.5 text-blue-400 group-hover:text-white" />
+                  <span className="tracking-wide">DESCARGAR MAPA KML (CAPAS ORDENADAS)</span>
+                </button>
+              )}
+
               <button
                 onClick={saveKmlToServer}
                 disabled={isSavingToServer}
@@ -2234,6 +2392,23 @@ export default function App() {
               <button 
                 onClick={() => setExcelNotice(null)}
                 className="ml-2 text-emerald-400 hover:text-white font-bold text-sm px-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
+          {/* KML Download Success Toast */}
+          {kmlNotice && (
+            <div className="absolute top-4 right-4 z-[999] bg-blue-950/95 border border-blue-500 text-blue-100 px-4 py-3 rounded-xl text-xs flex items-center space-x-2.5 shadow-2xl backdrop-blur-md animate-slideDown">
+              <Download className="w-4 h-4 text-blue-400 flex-shrink-0" />
+              <div>
+                <p className="font-bold text-blue-200">¡Mapa KML descargado con éxito!</p>
+                <p className="text-[11px] text-blue-300/90">{kmlNotice}</p>
+              </div>
+              <button 
+                onClick={() => setKmlNotice(null)}
+                className="ml-2 text-blue-400 hover:text-white font-bold text-sm px-1 cursor-pointer"
               >
                 ✕
               </button>
@@ -2323,16 +2498,38 @@ export default function App() {
                         })}
                       </div>
 
-                      {/* Botón Descargar Excel dentro del widget de brigadas */}
-                      <div className="pt-2 border-t border-slate-800/80 mt-1">
+                      {/* Botones de Descarga y Sincronización dentro del widget de brigadas */}
+                      <div className="pt-2 border-t border-slate-800/80 mt-1 space-y-1.5">
                         <button
                           onClick={handleDownloadExcel}
                           id="download-excel-widget-btn"
                           className="w-full py-1.5 px-2 bg-emerald-950/70 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-700/60 hover:border-emerald-500 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer shadow-sm select-none active:scale-[0.98]"
-                          title="Descargar archivo Excel con Brigada 1 y Brigada 2 con sus secciones"
+                          title="Descargar archivo Excel con coordinadores y sus secciones"
                         >
                           <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400 group-hover:text-white" />
                           <span>Descargar en Excel (.xlsx)</span>
+                        </button>
+
+                        {isAdmin && (
+                          <button
+                            onClick={() => handleDownloadCompositeKml()}
+                            id="download-kml-widget-btn"
+                            className="w-full py-1.5 px-2 bg-blue-950/70 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-700/60 hover:border-blue-500 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer shadow-sm select-none active:scale-[0.98]"
+                            title="Descargar el mapa actual en formato KML con capas ordenadas"
+                          >
+                            <Download className="w-3.5 h-3.5 text-blue-400 group-hover:text-white" />
+                            <span>Descargar Mapa en KML (.kml)</span>
+                          </button>
+                        )}
+
+                        <button
+                          onClick={handleForceSyncOfficial}
+                          id="sync-official-widget-btn"
+                          className="w-full py-1.5 px-2 bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/60 rounded-lg text-[10px] font-medium flex items-center justify-center gap-1.5 transition cursor-pointer shadow-sm select-none active:scale-[0.98]"
+                          title="Restablecer caché del teléfono al orden y colores oficiales de los 10 coordinadores"
+                        >
+                          <RefreshCw className="w-3 h-3 text-cyan-400" />
+                          <span>Actualizar a Orden Oficial</span>
                         </button>
                       </div>
                     </>
